@@ -1,0 +1,30 @@
+:root {
+  /* Brand (extracted from the OrganiShift logo) */
+  --brand-red: #ea4e54;
+  --brand-pink: #cb3258;
+  --brand-maroon: #ab1658;
+  --brand-gradient: linear-gradient(135deg, #ea4e54, #ab1658);
+
+  /* Neutrals */
+  --ink: #1f2933;
+  --ink-soft: #52606d;
+  --ink-faint: #7b8794;
+  --surface: #ffffff;
+  --bg: #f7f8fa;
+  --border: #e4e7eb;
+
+  /* Status */
+  --success: #2e7d32;
+  --warning: #b26a00;
+  --danger: #c62828;
+
+  /* Chrome */
+  --sidebar-dark: #231f20;
+  --radius: 8px;
+  --radius-sm: 6px;
+  --shadow-sm: 0 1px 2px rgba(31, 41, 51, 0.06);
+  --shadow-md: 0 4px 12px rgba(31, 41, 51, 0.1);
+  --shadow-lg: 0 12px 32px rgba(31, 41, 51, 0.16);
+
+  --font-stack: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+}

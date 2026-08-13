@@ -1,0 +1,22 @@
+.page {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.userCell {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.userName {
+  display: block;
+  font-weight: 700;
+}
+
+.userEmail {
+  display: block;
+  color: var(--ink-faint);
+  font-size: 13px;
+}
