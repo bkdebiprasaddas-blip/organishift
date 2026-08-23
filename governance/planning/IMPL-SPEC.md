@@ -3,7 +3,7 @@
 Implementation contract to be executed **mechanically** once the CODING gate is
 opened (**"code it"**). Derived from the frozen specs: System Design (.docx) +
 AI Agent Execution Spec + **the build contract (`OrganiShift_Agent_Build_Spec.md`,
-T-001…T-037)** — the build spec is the task-by-task authority and the planning
+T-001…T-039)** — the build spec is the task-by-task authority and the planning
 docs reconcile to it.
 
 ## 1. Repository layout (target — build spec §5)
@@ -141,9 +141,28 @@ build spec §8: Food **7**, Stage **4**, plan **11**, execution **13**) passes
 with evidence, no manual DB edits; acceptance suite (T-01…T-30) green; build
 clean. See RULEBOOK PART III P12.
 
-## 10. Sprints (build order — build spec §6, T-001…T-037)
+## 10. Sprints (build order — build spec §6, T-001…T-039)
 1 Foundation (T-001…T-005) → 2 Authentication (T-006…T-013) → 3 Planning Library
 (T-014…T-019) → 4 Event Plans (T-020…T-022) → 5 Events + Calendar (T-023…T-026)
-→ 6 Execution (T-027…T-031) → 7 UI polish (T-032…T-035) → 8 Testing + demo
-(T-036…T-037). TODO.md tracks each T-*/step; do not build layers all at once
-without reason.
+→ 6 Execution (T-027…T-031) → 7 UI polish (T-032…T-035) → 8 Testing + demo +
+deploy (T-036…T-039). TODO.md tracks each T-*/step; do not build layers all at
+once without reason.
+
+## 11. Open items & source defects (build spec §7 + §1.3) `[OPEN-n]/[S-n]`
+Each has a stated working default — implement the default and leave a `// OPEN-n`
+comment at the site, then continue. Do not silently diverge from a frozen value.
+
+| ID | Question | Resolution / default | Covered by |
+|---|---|---|---|
+| OPEN-1 | Do dashboard counters count leaves, or all execution items? | Leaves only — parent status is derived | T-029 / DoD row 1 |
+| OPEN-2 | `GET /api/users` Admin-only vs Manager needs it for assignment [S-1] | Widen to **Admin + Manager** (otherwise assignment is unusable) | T-017 / acceptance T-04 |
+| OPEN-3 | Re-open a completed item: §26 says Admin+Manager, Figure 12 says Manager only [S-2] | Follow **§26** (Admin + Manager); figure is illustrative | T-028 / acceptance T-21–T-22 |
+| OPEN-4 | Assign on a parent — inherit via `path`, or cascade to each leaf? [S-5] | **Inheritance** via `path`; assignee name appears on the parent node itself | T-024/T-028 / acceptance T-17 |
+| OPEN-5 | Does a Member see the full tree, or only owned branches? | Owned branches + ancestor rows for context; ancestors read-only; unowned branches not returned | T-029 / acceptance T-17 |
+| OPEN-6 | Do a Member's dashboard counters cover only their own work? | Yes — §2.6 "Member sees only assigned work" | T-029/T-031 / DoD row 1 |
+
+Source defects (resolved above, recorded so they are not silently dropped):
+S-1 (users route vs assignment), S-2 (re-open role), S-3 (seed counts 7/11/13),
+S-4 (seed account count + Rahul role), S-5 (parent assignment vs ownership check).
+Seed-account decision note: §8.1 seeds **4** users (Admin, Manager, 2 Members)
+per §35.1, resolving S-4; Appendix B's `Rahul` is the seeded **Manager**.

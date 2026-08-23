@@ -86,9 +86,17 @@ these T-IDs in reports and test output.
       icon+text status; aria-describedby; live region.
 - [ ] T-035 Consistency pass: one style per shared component across all contexts.
 
-## Sprint 8 — Testing + demo (T-036…T-037)
+## Sprint 8 — Testing + demo + deploy (T-036…T-039)
 - [ ] T-036 Full seed script (idempotent; build §8.1): users 4, Food(7)+Stage(4)
       library trees, Annual Function plan, no scheduled event; library shows 7+4.
 - [ ] T-037 Test pass: acceptance suite `T-01…T-30` green + client build clean +
       13-step DoD (corrected counts Food 7/Stage 4/plan 11/execution 13) without
       manual DB edits. README, SETUP-GUIDE, demo rehearsal notes.
+- [ ] T-038 Deployment [BOTH]: client to static host, API to Node host, Atlas M0
+      (IP allow-list); `CLIENT_ORIGIN` + `VITE_API_URL` set to deployed URLs.
+      Done: login works in a private browser window against deployed URLs, no
+      cached state. (Depends T-037.)
+- [ ] T-039 Rehearsal [BOTH]: run §8.2 against the deployed build end-to-end;
+      take a DB snapshot afterwards; keep local + private-window fallback for free
+      host sleep. Done: all 13 verification rows pass and a snapshot restores the
+      demo in seconds. (Depends T-038.)

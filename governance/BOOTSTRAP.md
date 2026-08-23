@@ -6,10 +6,13 @@
 ## Snapshot
 - **Phase:** PLANNING (fresh start). Prior project was fully reset/wiped on
   2026-08-23; this is a brand-new Phase 1 MVP per the frozen specs.
-- **Branch:** `v1` — fresh, empty repo (no commits yet).
-- **Remote:** `origin` → `https://github.com/bkdebiprasaddas-blip/organishift.git`
-  (not pushed; remote still holds old history — next push replaces it, needs
-  explicit approval).
+- **Branch:** `v1` — root-commit `110bc52` (scaffold) → `65f4c9d` (planning
+  reconciliation), both pushed to `origin/v1` (force-with-lease then safe
+  fast-forward; owner-approved "initialize and push to remote"). Local clean.
+- **Commit `65f4c9d`** reconciled build spec §6/§7/§8/§9 into planning:
+  task range T-001…T-039 (added T-038 Deploy + T-039 Rehearsal); added IMPL §11
+  Open-items `[OPEN-1…OPEN-6]` + source defects `[S-1…S-5]` registry. Specs
+  themselves archived (not committed — in `Scratch/`, git-ignored).
 - **Approved:** research/wipe scope + RULEBOOK PART III / AGENTS alignment
   (owner, 2026-08-23) + ingest `OrganiShift_Agent_Build_Spec.md` and reconcile
   planning docs to it (owner, 2026-08-23). This PLANNING bootstrap is
@@ -67,3 +70,14 @@ RUNBOOK trigger phrases: **"approve discovery"** · **"approve plan"** ·
 **"approve design"** · **"UI is final"** / **"start backend"** ·
 **"code it"** · **"run tests"** / **"test it"** · **"approve release"**.
 Current: PLANNING docs exist; awaiting owner review + **"approve plan"**.
+
+## Recovery artifacts (force-replaced history backup)
+Owner asked for a backup of the old `v1` (replaced by force-push). Recovered + backed up:
+- Old history still present locally as dangling objects (reflog) + `git tag`
+  `backup/old-v1-2026-08-23` @ `1cf76fe`; old chain 1cf76fe → c1efe63 →
+  6ee9763 → 9e8a082 (4 commits, the pre-wipe v2 rework).
+- Portable bundle outside the repo: `D:\Project\OrganiShift_MERN.backup\
+  v1-backup-2026-08-23.bundle` (0.23 MB, `git bundle verify` = okay, complete
+  history). Contains only benign `.env.example` placeholders — no real secrets.
+- Bundle is local-only (not pushed). Off-machine copy offered; deferred on
+  owner confirmation (would add a remote branch).
