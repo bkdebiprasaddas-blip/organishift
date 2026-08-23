@@ -1,0 +1,25 @@
+# Scratch/ is prototyping + AI memory ONLY - never committed, never shipped.
+Scratch/
+
+# Secrets / env - never commit real credentials.
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+
+# Dependencies + build output
+node_modules/
+dist/
+build/
+*.log
+
+# Runtime file uploads (server-side, generated)
+server/uploads/
+
+# First-run marker created by OrganiShift.bat
+.seeded
+
+# Auto-assigned ports persisted by OrganiShift.bat
+.organishift-ports
