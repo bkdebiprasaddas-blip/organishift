@@ -1,0 +1,165 @@
+const { test, before, after } = require('node:test');
+const assert = require('node:assert');
+const http = require('node:http');
+const mongoose = require('mongoose');
+
+const app = require('../src/server');
+const env = require('../src/config/env');
+const User = require('../src/models/User');
+const PlanningItem = require('../src/models/PlanningItem');
+
+let server, base;
+let adminToken = '', managerToken = '', memberToken = '';
+
+async function req(method, path, { token, body } = {}) {
+  const res = await fetch(base + path, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  let json = null;
+  try { json = await res.json(); } catch { /* no body */ }
+  return { status: res.status, json };
+}
+
+before(async () => {
+  const uri = env.MONGO_URI.replace(/\/[^/]+$/, '/organishift_test_http');
+  await mongoose.connect(uri);
+
+  await Promise.all([User.deleteMany({}), PlanningItem.deleteMany({})]);
+  const admin = await User.create({ name: 'Admin', email: 'a@t.com', passwordHash: 'Secret123', role: 'ADMIN' });
+  await User.create({ name: 'Manager', email: 'm@t.com', passwordHash: 'Secret123', role: 'MANAGER' });
+  await User.create({ name: 'Member', email: 'u@t.com', passwordHash: 'Secret123', role: 'MEMBER' });
+  void admin;
+
+  const jwt = require('jsonwebtoken');
+  adminToken = jwt.sign({ id: (await User.findOne({ email: 'a@t.com' }))._id, role: 'ADMIN' }, env.JWT_SECRET);
+  managerToken = jwt.sign({ id: (await User.findOne({ email: 'm@t.com' }))._id, role: 'MANAGER' }, env.JWT_SECRET);
+  memberToken = jwt.sign({ id: (await User.findOne({ email: 'u@t.com' }))._id, role: 'MEMBER' }, env.JWT_SECRET);
+
+  server = http.createServer(app);
+  await new Promise(r => { server.listen(0, r); });
+  base = `http://127.0.0.1:${server.address().port}`;
+});
+
+after(async () => {
+  await new Promise(r => server.close(r));
+  server.closeAllConnections();
+  await mongoose.connection.close();
+});
+
+test('H-01: health endpoint returns success envelope with db flag', async () => {
+  const { status, json } = await req('GET', '/api/health');
+  assert.strictEqual(status, 200);
+  assert.strictEqual(json.success, true);
+  assert.strictEqual(json.data.db, true);
+});
+
+test('H-02: login success returns token + user and never leaks hash', async () => {
+  const { status, json } = await req('POST', '/api/auth/login', {
+    body: { email: 'a@t.com', password: 'Secret123' }
+  });
+  assert.strictEqual(status, 200);
+  assert.strictEqual(json.success, true);
+  assert.ok(json.data.token);
+  assert.strictEqual(json.data.user.email, 'a@t.com');
+  assert.strictEqual(json.data.user.passwordHash, undefined);
+});
+
+test('H-03: login with wrong password -> 401 generic UNAUTHORIZED envelope', async () => {
+  const { status, json } = await req('POST', '/api/auth/login', {
+    body: { email: 'a@t.com', password: 'nope' }
+  });
+  assert.strictEqual(status, 401);
+  assert.strictEqual(json.success, false);
+  assert.strictEqual(json.error.code, 'UNAUTHORIZED');
+  assert.strictEqual(json.error.message, 'Invalid email or password');
+});
+
+test('H-04: malformed login payload -> 400 VALIDATION_ERROR with details', async () => {
+  const { status, json } = await req('POST', '/api/auth/login', {
+    body: { email: 'not-an-email', password: '' }
+  });
+  assert.strictEqual(status, 400);
+  assert.strictEqual(json.error.code, 'VALIDATION_ERROR');
+  assert.ok(Array.isArray(json.error.details));
+});
+
+test('H-05: protected route without token -> 401', async () => {
+  const { status, json } = await req('GET', '/api/auth/me');
+  assert.strictEqual(status, 401);
+  assert.strictEqual(json.success, false);
+});
+
+test('H-06: MEMBER on Admin-only user list -> 403 route-level RBAC', async () => {
+  const { status, json } = await req('GET', '/api/users', { token: memberToken });
+  assert.strictEqual(status, 403);
+  assert.strictEqual(json.error.code, 'FORBIDDEN');
+});
+
+test('H-07: MANAGER cannot create planning items (Admin owns structure)', async () => {
+  const { status, json } = await req('POST', '/api/planning-items', {
+    token: managerToken,
+    body: { title: 'Nope', scope: 'LIBRARY' }
+  });
+  assert.strictEqual(status, 403);
+  assert.strictEqual(json.error.code, 'FORBIDDEN');
+});
+
+test('H-08: ADMIN creates library item via API (201 envelope)', async () => {
+  const { status, json } = await req('POST', '/api/planning-items', {
+    token: adminToken,
+    body: { title: 'HTTP Root', scope: 'LIBRARY' }
+  });
+  assert.strictEqual(status, 201);
+  assert.strictEqual(json.data.title, 'HTTP Root');
+  assert.strictEqual(json.data.scope, 'LIBRARY');
+});
+
+test('H-09: move under own descendant -> 400 CYCLE_DETECTED over HTTP', async () => {
+  const root = (await req('POST', '/api/planning-items', {
+    token: adminToken, body: { title: 'Cycle Root', scope: 'LIBRARY' }
+  })).json.data;
+  await req('POST', '/api/planning-items', {
+    token: adminToken, body: { title: 'Cycle Child', scope: 'LIBRARY', parentId: root._id }
+  });
+
+  const { status, json } = await req('PUT', `/api/planning-items/${root._id}/move`, {
+    token: adminToken,
+    body: { newParentId: null }
+  });
+  // sanity: moving to root is legal; now attempt illegal one
+  assert.strictEqual(status, 200);
+
+  const childId = ((await req('GET', '/api/planning-items?scope=LIBRARY', { token: adminToken })).json.data)
+    .find(n => n._id === root._id).children[0]._id;
+
+  const bad = await req('PUT', `/api/planning-items/${root._id}/move`, {
+    token: adminToken, body: { newParentId: childId }
+  });
+  assert.strictEqual(bad.status, 400);
+  assert.strictEqual(bad.json.error.code, 'CYCLE_DETECTED');
+});
+
+test('H-10: scheduling with a past date -> 400 VALIDATION_ERROR', async () => {
+  const plan = (await req('POST', '/api/event-plans', {
+    token: adminToken, body: { title: 'Past Plan', category: 'T' }
+  })).json.data;
+
+  const { status, json } = await req('POST', '/api/events', {
+    token: adminToken,
+    body: { title: 'Old Event', planId: plan._id, startDate: '2020-01-01' }
+  });
+  assert.strictEqual(status, 400);
+  assert.strictEqual(json.error.code, 'VALIDATION_ERROR');
+});
+
+test('H-11: unknown API route -> 404 JSON envelope (never HTML)', async () => {
+  const { status, json } = await req('GET', '/api/does-not-exist');
+  assert.strictEqual(status, 404);
+  assert.strictEqual(json.success, false);
+  assert.strictEqual(json.error.code, 'NOT_FOUND');
+});

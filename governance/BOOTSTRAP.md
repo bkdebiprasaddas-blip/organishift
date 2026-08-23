@@ -4,80 +4,68 @@
 > (PART I–III). Short pointer: `AGENTS.md`.
 
 ## Snapshot
-- **Phase:** PLANNING (fresh start). Prior project was fully reset/wiped on
-  2026-08-23; this is a brand-new Phase 1 MVP per the frozen specs.
-- **Branch:** `v1` — root-commit `110bc52` (scaffold) → `65f4c9d` (planning
-  reconciliation), both pushed to `origin/v1` (force-with-lease then safe
-  fast-forward; owner-approved "initialize and push to remote"). Local clean.
-- **Commit `65f4c9d`** reconciled build spec §6/§7/§8/§9 into planning:
-  task range T-001…T-039 (added T-038 Deploy + T-039 Rehearsal); added IMPL §11
-  Open-items `[OPEN-1…OPEN-6]` + source defects `[S-1…S-5]` registry. Specs
-  themselves archived (not committed — in `Scratch/`, git-ignored).
-- **Approved:** research/wipe scope + RULEBOOK PART III / AGENTS alignment
-  (owner, 2026-08-23) + ingest `OrganiShift_Agent_Build_Spec.md` and reconcile
-  planning docs to it (owner, 2026-08-23). This PLANNING bootstrap is
-  auto-created; the PLANNING gate itself awaits **"approve plan"**.
-
-## Frozen authoritative specs (current location: reference-only in Scratch)
-> Moved to `Scratch/archive/` on 2026-08-23 by owner (reference-only,
-> **git-ignored** — not shipped, not tracked). Governance/planning docs already
-> encode the rules; these files remain the canonical originals for reference.
-- `OrganiShift_Phase1_System_Design.docx` — System Design (the "what").
-- `OrganiShift_AI_Agent_Execution_Spec.md` — AI Agent Execution Spec (the "how").
-- `OrganiShift_Agent_Build_Spec.md` — **build contract** (task-by-task T-001…T-037,
-  corrections C-1…C-11, source-defect fixes S-1…S-5, derived rules).
-- Source-of-truth order: user decision → frozen System Design → documented
-  additive improvements (build-spec corrections/derived) → AI Execution Spec →
-  existing code/conventions → judgment.
+- **Phase:** TESTING-ready — CODING complete. Owner said "FIX ALL" (2026-08-24):
+  T-013 shared components, T-018 unified TreeView, T-024 transactions,
+  T-032–T-035 polish, HTTP tests, **13/13 DoD rehearsal PASS** all done.
+  Remaining: formal TESTING gate trigger ("run tests" already satisfied by
+  evidence), deployment T-038/T-039 on owner request.
+- **Stack decision:** MERN in **JavaScript** (owner confirmed 2026-08-23).
+- **Branch:** `v1`. All code since `65f4c9d` is LOCAL + UNCOMMITTED (owner
+  triggers commits).
+- **Verification (2026-08-24):** server tests **29/29** (acceptance 18 +
+  http-layer 11, isolated DBs `organishift_test` / `_http`); DoD rehearsal
+  **13/13** (`organishift_dod`); client production build clean.
 
 ## Product (Phase 1)
-- Reusable event planning, scheduling and execution tracking.
-- Core workflow: Reusable planning structures → Event Plan → Scheduled Event →
-  Execution Copy → Progress Tracking.
-- Six pages: `/login /dashboard /planning-library /event-plans /calendar /events/:id`.
-- Roles: ADMIN / MANAGER / MEMBER (enforce at API). Five collections:
-  `users, eventPlans, planningItems, events, eventItems`.
-- OUT of Phase 1: AI generation, notifications, reminders, comments,
-  attachments, budgets, dependencies, real-time/Socket.IO, weighted progress,
-  marketplace, template sharing, complex analytics, GraphQL, extra collections/
-  microservices, drag-and-drop, Kanban, Gantt, charts beyond one progress bar.
+- Routes: `/login /dashboard /planning-library /event-plans /calendar
+  /execution /events/:id`.
+- Shared frontend core: `components/common/{Toast,TreeView,index}` used by all
+  pages; Layout has working mobile drawer.
+- Backend transactions: `utils/withTx` wraps cascade delete, plan→event clone,
+  execution subtree delete (auto-fallback without session on standalone Mongo).
 
-## Environment (REAL, verified 2026-08-23)
-- OS: Windows (PowerShell shell).
-- Node: **v24.18.0** (`node --version`).
-- npm: **11.16.0** (`npm --version`).
-- Git: **2.55.0.windows.3** (`git --version`).
-- MongoDB: **Server 8.3** installed at
-  `C:\Program Files\MongoDB\Server\8.3\bin\mongod.exe`; Windows service
-  **MongoDB** = `Running` (status verified, `Get-Service`). CLI not on PATH.
-- Stack: MERN — MongoDB, Express, React (Vite), Node. Three-tier + modular
-  service layer.
+## Environment (REAL, verified 2026-08-23/24)
+- Windows · PowerShell. Node **v24.18.0**, npm **11.16.0**,
+  git **2.55.0.windows.3**, MongoDB Server **8.3** (Windows service Running;
+  CLI not on PATH; **mongosh** installed at user level).
+- Dev servers: API :5000 (`npm run dev` in `server/`), client :5173
+  (`npm run dev` in `client/`). Launcher: root `start.bat`.
+- Demo logins (seeded, local-only): admin|manager|member1|member2
+  `@organishift.dev` / `Password123!` — see `server/src/seed/seed.js`.
 
-## Folder map (current)
-- ROOT: `server/` (target), `client/` (target), `AGENTS.md`, `.gitignore`.
-- `Scratch/`: `archive/` holds the three frozen spec files (reference-only,
-  git-ignored). Recreate normal prep subfolders only if disposable prep is needed.
-- `governance/`: `RULEBOOK.md`, `BOOTSTRAP.md` (this), `ai-context/` (+`archive/`),
-  `work-log/`, `planning/`, `documentation/`.
+## Repo map (current)
+```
+ROOT: AGENTS.md · start.bat · .gitignore
+server/   Express+Mongoose JS API (src/{config,models,services,controllers,
+          routes,middleware,utils}, seed/, scripts/{db,create-ganpati-plan}.js,
+          test/acceptance.test.js [18 tests])
+client/   React 18 + Vite + Tailwind (pages: Login, Dashboard[myWork],
+          PlanningLibrary[tree+kebab CRUD], EventPlans[icon grid→builder+
+          import], Calendar[month grid+scheduling], ExecutionHub,
+          EventExecution[field-gated checklist]; Layout shell; AuthContext)
+governance/ RULEBOOK · BOOTSTRAP · planning/{PLAN,ARCH-DESIGN,IMPL-SPEC,
+          UI-SPEC,TODO} · ai-context/ · work-log/ · documentation/
+Scratch/  archive/ frozen specs · logo/ · OrganiShift/coding/index.html
+          (interactive UI prototype, kept as design reference)
+```
 
-## Seed / DoD counts (corrected — build spec §8)
-Food library tree = **7** nodes · Stage = **4** · Annual Function plan =
-**11** copied nodes · scheduled execution = **13** items. Acceptance tests =
-`T-01…T-30`; build task list = `T-001…T-037`.
+## Data (live DB `organishift`, 2026-08-24)
+- users 4 (admin/manager/member1/member2) · library 11 (Food 7 + Stage 4)
+- EventPlans 2: Annual Function Blueprint (11 nodes) + **Ganesh Chaturthi
+  Ayojan (73 nodes, owner-requested demo)** via `server/scripts/create-ganpati-plan.js`
+- Events 1 scheduled ("Annual Cultural Fest") with cloned execution tree;
+  member2 assigned a leaf for scoping demo.
+- Tests use separate `organishift_test` DB (never touch seed data).
 
-## Gates (RULEBOOK §F — trigger words)
-RUNBOOK trigger phrases: **"approve discovery"** · **"approve plan"** ·
-**"approve design"** · **"UI is final"** / **"start backend"** ·
-**"code it"** · **"run tests"** / **"test it"** · **"approve release"**.
-Current: PLANNING docs exist; awaiting owner review + **"approve plan"**.
+## Gates (RULEBOOK §F)
+DISCOVERY ✅ · PLANNING ✅ · DESIGN ✅ · UI ✅ (iterative tweaks ongoing) ·
+CODING ✅ open · TESTING ◐ partial (18 core tests green; HTTP-layer tests +
+13-step DoD run pending → trigger **"run tests"**) · RELEASE ⬜ (**"approve
+release"**).
 
-## Recovery artifacts (force-replaced history backup)
-Owner asked for a backup of the old `v1` (replaced by force-push). Recovered + backed up:
-- Old history still present locally as dangling objects (reflog) + `git tag`
-  `backup/old-v1-2026-08-23` @ `1cf76fe`; old chain 1cf76fe → c1efe63 →
-  6ee9763 → 9e8a082 (4 commits, the pre-wipe v2 rework).
-- Portable bundle outside the repo: `D:\Project\OrganiShift_MERN.backup\
-  v1-backup-2026-08-23.bundle` (0.23 MB, `git bundle verify` = okay, complete
-  history). Contains only benign `.env.example` placeholders — no real secrets.
-- Bundle is local-only (not pushed). Off-machine copy offered; deferred on
-  owner confirmation (would add a remote branch).
+## Known debts (tracked in TODO.md notes)
+- T-013/T-018: shared common components + single TreeView extraction pending
+  (patterns exist per-page).
+- Cascade delete + clone not yet wrapped in explicit Mongo sessions/transactions.
+- ProtectedRoute preserves attempted path ✅ but deep-link role redirects are
+  simple (to /dashboard).

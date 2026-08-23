@@ -12,6 +12,7 @@ Design §31 + AI Execution Spec §16 + **build spec §2.8 / §4 / T-012…T-035*
 | `/planning-library` | Planning Library | recursive tree, expand/collapse, inline add/rename, move, delete confirm | planning-item routes |
 | `/event-plans` | Event Plans | plan cards, builder panel, add-from-library picker, custom item form | event-plan routes + from-library |
 | `/calendar` | Calendar | month grid, event pill, schedule dialog with plan picker | GET/POST /api/events |
+| `/execution` | Execution Hub | icon box grid per event, status filter pills | GET /api/events |
 | `/events/:id` | Event Execution | progress header, recursive tree with status/assignee/priority/due controls | event-item + progress routes |
 
 ## 2. States every page must handle
@@ -37,8 +38,18 @@ No separate tree implementations.
   - Admin: Dashboard · Planning Library · Event Plans · Calendar
   - Manager: Dashboard · Planning Library · Calendar
   - Member: Dashboard · Calendar
-- **Execution is NOT a nav item** — reached from Calendar/Dashboard/plan
-  builder; breadcrumb `Calendar / <event title>`.
+- **Execution is a top-level sidebar nav item — OWNER DECISION 2026-08-23
+  (replaces the earlier "not a nav item" rule).** Route: `/execution`.
+  Lists all scheduled events as clickable icon boxes (large icon tile + title +
+  date/venue + status badge + progress bar + summary line + "Open execution"
+  link). Clicking a box opens `/events/:id` (full execution tree). Visible to
+  all roles; the API filters the list by permissions (Member sees only events
+  where they have assigned work). Status-filter pills at the top: All / Planned
+  / Ongoing / Done. Breadcrumb from execution detail: `Execution / <event title>`.
+- **Sidebar nav (updated):
+  - Admin: Dashboard · Planning Library · Event Plans · Calendar · Execution
+  - Manager: Dashboard · Planning Library · Calendar · Execution
+  - Member: Dashboard · Calendar · Execution
 - Active item marked by **fill AND a left accent bar**. No notification bell,
   no settings link. Role badge visible.
 - Delete of a parent = cascade; **require confirmation** showing the item count
@@ -49,10 +60,12 @@ No separate tree implementations.
   + `Signing in…` while pending; **generic inline error (never reveals whether
   email exists)**; no registration/social. Logo/back to dashboard.
 - **Planning Library (Admin only, T-019):** `+ New Item`; row kebab `⋮`
-  `Add child · Rename · Move · Delete` shown on hover/focus **only for Admin**
-  (Manager sees no kebab at all); inline add-child (Enter submit / Escape
-  cancel), inline rename, move dialog (parent picker excludes item + descendants;
-  show `CYCLE_DETECTED` and leave the tree on rejection); delete confirm with
+  `Add Child · Rename · Move · Delete` shown on hover/focus **only for Admin**
+  (Manager sees no kebab at all); tree with expand/collapse chevron per parent
+  node, `Expand All` / `Collapse All` buttons; collapse shows folder icon +
+  hidden count badge. Inline add-child (Enter submit / Escape cancel), inline
+  rename, move dialog (parent picker excludes item + descendants; show
+  `CYCLE_DETECTED` and leave the tree on rejection); delete confirm with
   count + up to 5 names. Optional one client-side name filter. All five states.
 - **Event Plans (Admin, T-022):** plan cards (title, item count, last updated)
   + `Open`; builder **on the same route** (no seventh page); tree left / details
@@ -60,10 +73,7 @@ No separate tree implementations.
   Save — every action commits immediately**; `[Library]` vs `[Custom]` badges;
   explicit copy picker ("7 items will be copied… later changes won't affect this
   plan").
-- **Calendar (T-026):** month grid `◀ ▶ Today`; event pill = title + progress
-  bar + percent; `+N more` overflow; click → `/events/:id`; today outlined.
-  Schedule dialog: plan picker (fetched when dialog opens), title, start date,
-  optional end date, optional venue, copied-count line; disable submit + progress.
+- **Calendar (T-026):** month grid `◀ September 2026 ▶` + `Today` button; 7-column weekday grid (Sun–Sat); 35-cell date grid; event pills placed on start/duration dates with status color dot + title + progress bar + %; clicking pill navigates to `/events/:id`. Schedule dialog: plan picker, title, start date, optional end date, optional venue.
 - **Event Execution (T-028…T-030):** header = title, dates, venue (omit row when
   absent), event-status badge, progress bar, counts line. Field-gated controls
   per build spec §4:

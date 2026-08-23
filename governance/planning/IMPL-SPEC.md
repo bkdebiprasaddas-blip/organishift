@@ -148,6 +148,12 @@ clean. See RULEBOOK PART III P12.
 deploy (T-036…T-039). TODO.md tracks each T-*/step; do not build layers all at
 once without reason.
 
+**Execution amendment — OWNER DECISION 2026-08-23:** modules are built as
+**vertical slices, one at a time**, per module: UI design → DB
+(models/services/routes) → fully wired end-to-end. Module→task mapping in
+`TODO.md` §"Build order". Sprints remain the traceability ledger; module order
+governs sequencing.
+
 ## 11. Open items & source defects (build spec §7 + §1.3) `[OPEN-n]/[S-n]`
 Each has a stated working default — implement the default and leave a `// OPEN-n`
 comment at the site, then continue. Do not silently diverge from a frozen value.
