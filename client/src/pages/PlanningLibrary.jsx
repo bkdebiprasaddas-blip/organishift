@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react';
 import {
-  Folder, FolderOpen, FileText, EllipsisVertical, FolderPlus,
+  Folder, FolderOpen, FileText, FolderPlus,
   Pencil, FolderSymlink, Trash2, Plus
 } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/common/Toast';
 import TreeView from '../components/common/TreeView';
-import { Modal, ConfirmDialog, Spinner, EmptyState, ErrorState } from '../components/common';
+import DropdownMenu from '../components/common/DropdownMenu';
+import { Modal, ConfirmDialog, EmptyState, ErrorState, SkeletonCard } from '../components/common';
 
 export default function PlanningLibrary() {
   const { user } = useAuth();
@@ -17,67 +18,80 @@ export default function PlanningLibrary() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [collapsed, setCollapsed] = useState({});
-  const [kebabId, setKebabId] = useState(null);
   const [modal, setModal] = useState(null); // {type:'add'|'rename'|'move', node, title, parentId}
   const [confirm, setConfirm] = useState(null); // {node, total}
+  const [busy, setBusy] = useState(false);
 
   const toast = useToast();
 
-  const load = () => {
-    setLoading(true);
+  // IMP-B2: skeleton only on first paint; mutations refresh silently
+  const load = (silent = false) => {
+    if (!silent) setLoading(true);
     setError('');
     api.get('/planning-items', { params: { scope: 'LIBRARY' } })
-      .then(setTree)
+      .then(data => { setTree(data); })
       .catch(err => setError(err.message || 'Failed to load library'))
       .finally(() => setLoading(false));
   };
 
   useEffect(() => { load(); }, []);
 
-  useEffect(() => {
-    const close = e => { if (!e.target.closest('[data-kebab]')) setKebabId(null); };
-    document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
-  }, []);
+  // Collect a node's whole subtree ids (IMP-C5: never offer them as move targets)
+  const subtreeIds = node => {
+    const ids = [];
+    const walk = n => n.children.forEach(c => { ids.push(c._id); walk(c); });
+    walk(node);
+    return ids;
+  };
 
-  const addChild = async () => {
+  const runAction = async fn => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await fn();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const addChild = () => runAction(async () => {
     const title = modal?.title?.trim();
     if (!title) return;
     try {
       await api.post('/planning-items', { title, scope: 'LIBRARY', parentId: modal.node?._id || null });
-      setModal(null); load();
+      setModal(null); load(true);
       toast(`Added "${title}"`);
     } catch (err) { toast(err.message || 'Failed to add', 'error'); }
-  };
+  });
 
-  const rename = async () => {
+  const rename = () => runAction(async () => {
     const title = modal?.title?.trim();
     if (!title) return;
     try {
       await api.put(`/planning-items/${modal.node._id}`, { title });
-      setModal(null); load();
+      setModal(null); load(true);
       toast('Item renamed');
     } catch (err) { toast(err.message || 'Failed to rename', 'error'); }
-  };
+  });
 
-  const move = async () => {
+  const move = () => runAction(async () => {
     try {
       await api.put(`/planning-items/${modal.node._id}/move`, { newParentId: modal.parentId ?? null });
-      setModal(null); load();
+      setModal(null); load(true);
       toast('Item moved');
     } catch (err) {
-      setModal(null); load();
+      setModal(null); load(true);
       toast(err.code === 'CYCLE_DETECTED' ? 'Cannot move under its own descendant' : (err.message || 'Move failed'), 'error');
     }
-  };
+  });
 
-  const remove = async () => {
+  const remove = () => runAction(async () => {
     try {
       await api.delete(`/planning-items/${confirm.node._id}`);
-      setConfirm(null); load();
+      setConfirm(null); load(true);
       toast('Item and sub-tree deleted');
     } catch (err) { setConfirm(null); toast(err.message || 'Delete failed', 'error'); }
-  };
+  });
 
   const countAll = n => n.children.reduce((acc, c) => acc + 1 + countAll(c), 0);
 
@@ -96,8 +110,8 @@ export default function PlanningLibrary() {
   if (loading) {
     return (
       <div className="space-y-6">
-        <div className="h-24 animate-pulse rounded-xl border border-slate-200 bg-white" />
-        <div className="h-64 animate-pulse rounded-xl border border-slate-200 bg-white" />
+        <SkeletonCard className="h-24" />
+        <SkeletonCard className="h-64" />
       </div>
     );
   }
@@ -164,38 +178,30 @@ export default function PlanningLibrary() {
                 </>
               );
             }}
-            renderActions={isAdmin ? (node) => {
-              const kids = node.children.length;
-              return (
-                <>
-                  <button
-                    data-kebab
-                    aria-label={`Actions for ${node.title}`}
-                    onClick={e => { e.stopPropagation(); setKebabId(kebabId === node._id ? null : node._id); }}
-                    className={`min-h-[32px] min-w-[32px] rounded p-1.5 text-slate-400 opacity-0 transition hover:bg-slate-200 hover:text-slate-700 focus:opacity-100 group-hover:opacity-100 ${kebabId === node._id ? '!opacity-100' : ''}`}
-                  >
-                    <EllipsisVertical className="h-4 w-4" />
-                  </button>
-                  {kebabId === node._id && (
-                    <div data-kebab className="absolute right-3 top-11 z-20 w-44 rounded-xl border border-slate-200 bg-white py-1.5 shadow-lg">
-                      <button onClick={() => { setKebabId(null); setModal({ type: 'add', node, title: '' }); }} className="flex w-full items-center gap-2.5 px-3 py-2.5 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700">
-                        <FolderPlus className="h-3.5 w-3.5" />Add Child
-                      </button>
-                      <button onClick={() => { setKebabId(null); setModal({ type: 'rename', node, title: node.title }); }} className="flex w-full items-center gap-2.5 px-3 py-2.5 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700">
-                        <Pencil className="h-3.5 w-3.5" />Rename
-                      </button>
-                      <button onClick={() => { setKebabId(null); setModal({ type: 'move', node, parentId: node.parentId }); }} className="flex w-full items-center gap-2.5 px-3 py-2.5 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700">
-                        <FolderSymlink className="h-3.5 w-3.5" />Move
-                      </button>
-                      <div className="mx-2 my-1 border-t border-slate-100" />
-                      <button onClick={() => { setKebabId(null); setConfirm({ node, total: 1 + countAll(node) }); }} className="flex w-full items-center gap-2.5 px-3 py-2.5 text-xs font-semibold text-rose-600 hover:bg-rose-50">
-                        <Trash2 className="h-3.5 w-3.5" />Delete
-                      </button>
-                    </div>
-                  )}
-                </>
-              );
-            } : undefined}
+            renderActions={isAdmin ? (node) => (
+              <DropdownMenu
+                label={`Actions for ${node.title}`}
+                buttonClassName="min-h-[32px] min-w-[32px] rounded p-1.5 text-slate-400 opacity-0 transition hover:bg-slate-200 hover:text-slate-700 focus:opacity-100 group-hover:opacity-100"
+              >
+                {close => (
+                  <>
+                    <button role="menuitem" onClick={() => { close(); setModal({ type: 'add', node, title: '' }); }} className="flex w-full items-center gap-2.5 px-3 py-2.5 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700">
+                      <FolderPlus className="h-3.5 w-3.5" />Add Child
+                    </button>
+                    <button role="menuitem" onClick={() => { close(); setModal({ type: 'rename', node, title: node.title }); }} className="flex w-full items-center gap-2.5 px-3 py-2.5 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700">
+                      <Pencil className="h-3.5 w-3.5" />Rename
+                    </button>
+                    <button role="menuitem" onClick={() => { close(); setModal({ type: 'move', node, parentId: node.parentId }); }} className="flex w-full items-center gap-2.5 px-3 py-2.5 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700">
+                      <FolderSymlink className="h-3.5 w-3.5" />Move
+                    </button>
+                    <div className="mx-2 my-1 border-t border-slate-100" />
+                    <button role="menuitem" onClick={() => { close(); setConfirm({ node, total: 1 + countAll(node) }); }} className="flex w-full items-center gap-2.5 px-3 py-2.5 text-xs font-semibold text-rose-600 hover:bg-rose-50">
+                      <Trash2 className="h-3.5 w-3.5" />Delete
+                    </button>
+                  </>
+                )}
+              </DropdownMenu>
+            ) : undefined}
             renderCollapsed={node => (
               <div className="ml-[11px] pl-5">
                 <button
@@ -219,14 +225,24 @@ export default function PlanningLibrary() {
             autoFocus
             value={modal.title}
             onChange={e => setModal(m => ({ ...m, title: e.target.value }))}
-            onKeyDown={e => e.key === 'Enter' && (modal.type === 'add' ? addChild() : rename())}
+            onKeyDown={e => e.key === 'Enter' && !busy && modal.title.trim() && (modal.type === 'add' ? addChild() : rename())}
             placeholder="Item title"
             aria-label="Item title"
-            className="w-full rounded-lg border border-slate-300 p-2.5 text-xs font-semibold"
+            aria-invalid={!modal.title.trim()}
+            className={`w-full rounded-lg border p-2.5 text-xs font-semibold ${modal.title.trim() ? 'border-slate-300' : 'border-rose-300'}`}
           />
+          {!modal.title.trim() && (
+            <p className="mt-1.5 text-[11px] font-medium text-rose-600">Title is required.</p>
+          )}
           <div className="mt-5 flex justify-end gap-2">
             <button onClick={() => setModal(null)} className="min-h-[36px] px-3 py-1.5 text-xs font-semibold text-slate-600">Cancel</button>
-            <button onClick={() => (modal.type === 'add' ? addChild() : rename())} className="min-h-[36px] rounded-lg bg-indigo-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm">Save</button>
+            <button
+              onClick={() => (modal.type === 'add' ? addChild() : rename())}
+              disabled={busy || !modal.title.trim()}
+              className="min-h-[36px] rounded-lg bg-indigo-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm disabled:opacity-50"
+            >
+              {busy ? 'Saving…' : 'Save'}
+            </button>
           </div>
         </Modal>
       )}
@@ -242,13 +258,16 @@ export default function PlanningLibrary() {
             className="w-full rounded-lg border border-slate-300 p-2.5 text-xs font-semibold"
           >
             <option value="">Root level</option>
-            {flatNodes.filter(n => n._id !== modal.node._id).map(n => (
-              <option key={n._id} value={n._id}>{'\u00A0'.repeat(n.depth * 2)}{n.title}</option>
-            ))}
+            {flatNodes
+              .filter(n => n._id !== modal.node._id && !subtreeIds(modal.node).includes(n._id))
+              .map(n => (
+                <option key={n._id} value={n._id}>{'\u00A0'.repeat(n.depth * 2)}{n.title}</option>
+              ))}
           </select>
+          <p className="mt-1.5 text-[11px] text-slate-400">A branch cannot be moved inside itself.</p>
           <div className="mt-5 flex justify-end gap-2">
             <button onClick={() => setModal(null)} className="min-h-[36px] px-3 py-1.5 text-xs font-semibold text-slate-600">Cancel</button>
-            <button onClick={move} className="min-h-[36px] rounded-lg bg-indigo-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm">Move</button>
+            <button onClick={move} disabled={busy} className="min-h-[36px] rounded-lg bg-indigo-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm disabled:opacity-50">Move</button>
           </div>
         </Modal>
       )}

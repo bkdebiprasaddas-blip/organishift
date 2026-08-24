@@ -15,6 +15,17 @@ const errorMiddleware = (err, req, res, next) => {
     details = err.errors.map(e => ({ field: e.path.join('.'), message: e.message }));
   }
 
+  // Handle Mongoose schema validation errors (e.g. bad enum values)
+  if (err.name === 'ValidationError' && err.errors) {
+    statusCode = 400;
+    code = 'VALIDATION_ERROR';
+    message = 'Validation failed';
+    details = Object.values(err.errors).map(e => ({
+      field: e.path,
+      message: e.message
+    }));
+  }
+
   // Handle Mongoose duplicate key (409)
   if (err.code === 11000) {
     statusCode = 409;

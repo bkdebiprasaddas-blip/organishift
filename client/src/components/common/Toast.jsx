@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useRef, useState } from 'react';
+import { AlertCircle, CheckCircle2, X } from 'lucide-react';
 
 const ToastContext = createContext(() => {});
 
@@ -9,8 +10,11 @@ export function ToastProvider({ children }) {
   const showToast = useCallback((message, type = 'success') => {
     const id = ++idRef.current;
     setToasts(t => [...t, { id, message, type }]);
-    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), 3000);
+    // Errors stay longer and can be dismissed manually (IMP-C6)
+    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), type === 'error' ? 8000 : 3000);
   }, []);
+
+  const dismiss = useCallback(id => setToasts(t => t.filter(x => x.id !== id)), []);
 
   return (
     <ToastContext.Provider value={showToast}>
@@ -25,7 +29,18 @@ export function ToastProvider({ children }) {
                 : 'bg-slate-900 text-white'
             }`}
           >
+            {t.type === 'error' ? (
+              <AlertCircle className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+            ) : (
+              <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-400" aria-hidden="true" />
+            )}
             <span className="text-xs font-semibold">{t.message}</span>
+            {t.type === 'error' && (
+              <button onClick={() => dismiss(t.id)} aria-label="Dismiss notification"
+                className="ml-1 rounded p-0.5 hover:bg-rose-100">
+                <X className="h-3 w-3" aria-hidden="true" />
+              </button>
+            )}
           </div>
         ))}
       </div>

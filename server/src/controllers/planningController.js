@@ -13,6 +13,12 @@ const createItemSchema = z.object({
   order: z.number().optional()
 });
 
+const updateItemSchema = z.object({
+  title: z.string().min(1).max(120).optional(),
+  description: z.string().max(500).optional(),
+  order: z.number().optional()
+});
+
 const getItems = asyncHandler(async (req, res) => {
   const tree = await planningService.getTree(req.query);
   return res.status(200).json({
@@ -43,15 +49,15 @@ const getItemById = asyncHandler(async (req, res) => {
 });
 
 const updateItem = asyncHandler(async (req, res) => {
+  const parsed = updateItemSchema.parse(req.body);
   const item = await PlanningItem.findById(req.params.id);
   if (!item) {
     throw new ApiError(404, 'NOT_FOUND', 'Planning item not found');
   }
 
-  const { title, description, order } = req.body;
-  if (title) item.title = title;
-  if (description !== undefined) item.description = description;
-  if (order !== undefined) item.order = order;
+  if (parsed.title !== undefined) item.title = parsed.title;
+  if (parsed.description !== undefined) item.description = parsed.description;
+  if (parsed.order !== undefined) item.order = parsed.order;
 
   await item.save();
 

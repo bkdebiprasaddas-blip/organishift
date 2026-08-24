@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Outlet, NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import api from '../services/api';
 import { LayoutDashboard, FolderTree, ClipboardList, CalendarDays, ListChecks, LogOut, Menu } from 'lucide-react';
 
 export default function Layout() {
@@ -8,8 +9,43 @@ export default function Layout() {
   const location = useLocation();
   const role = user?.role;
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(() => window.matchMedia('(min-width: 768px)').matches);
+  const [eventTitle, setEventTitle] = useState('');
+
+  useEffect(() => {
+    const mq = window.matchMedia('(min-width: 768px)');
+    const onChange = e => setIsDesktop(e.matches);
+    mq.addEventListener('change', onChange);
+    return () => mq.removeEventListener('change', onChange);
+  }, []);
 
   useEffect(() => { setDrawerOpen(false); }, [location.pathname]);
+
+  // Close on Escape + lock background scroll while the mobile drawer is open
+  useEffect(() => {
+    if (!drawerOpen) return undefined;
+    const onKey = e => { if (e.key === 'Escape') setDrawerOpen(false); };
+    document.addEventListener('keydown', onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [drawerOpen]);
+
+  const eventId = location.pathname.match(/^\/events\/([^/]+)/)?.[1];
+  useEffect(() => {
+    if (!eventId) {
+      setEventTitle('');
+      return undefined;
+    }
+    let alive = true;
+    api.get(`/events/${eventId}`)
+      .then(ev => { if (alive) setEventTitle(ev.title || 'Event Execution'); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [eventId]);
 
   const getNavLinks = () => {
     const links = [
@@ -41,7 +77,7 @@ export default function Layout() {
         <div className="truncate text-sm">
           <NavLink to="/execution" className="font-medium text-indigo-600 hover:text-indigo-500">Execution</NavLink>
           <span className="mx-1.5 text-slate-400">/</span>
-          <span className="font-semibold text-slate-900">Event Execution</span>
+          <span className="truncate font-semibold text-slate-900">{eventTitle || 'Event Execution'}</span>
         </div>
       );
     }
@@ -59,6 +95,8 @@ export default function Layout() {
     );
   };
 
+  const drawerHidden = !drawerOpen && !isDesktop;
+
   return (
     <div className="min-h-screen flex flex-col md:flex-row bg-slate-100">
 
@@ -72,6 +110,8 @@ export default function Layout() {
 
       <aside
         id="sidebar"
+        {...(drawerHidden ? { inert: '' } : {})}
+        aria-hidden={drawerHidden}
         className={`fixed inset-y-0 left-0 z-30 flex w-[248px] flex-col border-r border-slate-200 bg-white transition-transform duration-200 md:translate-x-0 ${drawerOpen ? 'translate-x-0' : '-translate-x-full'}`}
       >
         <div className="flex h-16 items-center border-b border-slate-200 px-5">

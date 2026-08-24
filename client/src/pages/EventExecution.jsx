@@ -7,21 +7,8 @@ import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/common/Toast';
 import TreeView from '../components/common/TreeView';
-import { Modal, Spinner, ErrorState } from '../components/common';
-
-const STATUS_STYLES = {
-  NOT_STARTED: 'bg-slate-100 text-slate-600 border-slate-200',
-  IN_PROGRESS: 'bg-blue-50 text-blue-700 border-blue-200',
-  COMPLETED: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  BLOCKED: 'bg-rose-50 text-rose-700 border-rose-200'
-};
-
-const PRIORITY_STYLES = {
-  LOW: 'text-slate-500',
-  MEDIUM: 'text-sky-600',
-  HIGH: 'font-bold text-orange-600',
-  CRITICAL: 'font-bold text-rose-600'
-};
+import { Modal, Spinner, ErrorState, Chip, STATUS_CHIP, PRIORITY_TEXT } from '../components/common';
+import { relativeDate } from '../utils/dates';
 
 const TRANSITIONS = {
   NOT_STARTED: ['IN_PROGRESS', 'BLOCKED'],
@@ -100,9 +87,7 @@ export default function EventExecution() {
               {event.venue && <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{event.venue}</span>}
             </p>
           </div>
-          <span className={`rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide ${STATUS_STYLES[event.status] || STATUS_STYLES.PLANNED}`}>
-            {event.status}
-          </span>
+          <Chip kind={event.status}>{event.status}</Chip>
         </div>
         <div>
           <div className="mb-1 flex justify-between text-xs font-semibold">
@@ -152,20 +137,20 @@ export default function EventExecution() {
                     ? (isCol ? <Folder className="h-4 w-4 shrink-0 text-slate-500" /> : <FolderOpen className="h-4 w-4 shrink-0 text-slate-500" />)
                     : <FileText className="h-4 w-4 shrink-0 text-slate-400" />}
                   <span className={`truncate text-xs ${hasKids ? 'font-bold text-slate-900' : 'font-semibold text-slate-800'}`}>{node.title}</span>
-                  <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide ${STATUS_STYLES[node.status]}`}>
-                    {label(node.status)}
-                  </span>
+                  <Chip kind={node.status}>{label(node.status)}</Chip>
                   {node.priority && (
-                    <span className={`shrink-0 text-[10px] uppercase ${PRIORITY_STYLES[node.priority]}`}>{node.priority}</span>
+                    <span className={`shrink-0 text-[10px] uppercase ${PRIORITY_TEXT[node.priority]}`}>{node.priority}</span>
                   )}
-                  {node.dueDate && (
-                    <span className="hidden shrink-0 items-center gap-1 text-[10px] text-slate-400 sm:inline-flex">
-                      due {new Date(node.dueDate).toLocaleDateString()}
-                      {new Date(node.dueDate) < new Date() && node.status !== 'COMPLETED' && (
-                        <span className="rounded bg-red-100 px-1 py-0.5 text-[9px] font-bold text-red-700">OVERDUE</span>
-                      )}
-                    </span>
-                  )}
+                  {node.dueDate && (() => {
+                    const overdue = new Date(node.dueDate) < new Date() && node.status !== 'COMPLETED';
+                    return (
+                      <span className={`flex shrink-0 flex-wrap items-center gap-1 text-[10px] ${overdue ? 'font-semibold text-rose-600' : 'text-slate-500'}`}>
+                        <span className="hidden sm:inline">due {new Date(node.dueDate).toLocaleDateString()}</span>
+                        <span className="sm:hidden">{relativeDate(node.dueDate)}</span>
+                        {overdue && <span className="rounded bg-rose-100 px-1 py-0.5 text-[9px] font-bold text-rose-700">OVERDUE</span>}
+                      </span>
+                    );
+                  })()}
                 </>
               );
             }}
@@ -221,7 +206,7 @@ export default function EventExecution() {
                       value={node.status}
                       onChange={e => updateItem(node, { status: e.target.value })}
                       aria-label={`Status of ${node.title}`}
-                      className={`rounded-md border px-2 py-1.5 text-[11px] font-bold uppercase ${STATUS_STYLES[node.status]}`}
+                      className={`rounded-md border px-2 py-1.5 text-[11px] font-bold uppercase ${STATUS_CHIP[node.status] || STATUS_CHIP.NOT_STARTED}`}
                     >
                       <option value={node.status}>{label(node.status)}</option>
                       {options.map(s => <option key={s} value={s}>{label(s)}</option>)}

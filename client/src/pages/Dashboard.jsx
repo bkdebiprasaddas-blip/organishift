@@ -3,6 +3,8 @@ import { NavLink } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/common/Toast';
+import { Chip, ErrorState, SkeletonCard } from '../components/common';
+import { relativeDate } from '../utils/dates';
 
 const STATUS_LABEL = s => s.replace(/_/g, ' ');
 
@@ -11,12 +13,13 @@ export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [updatingId, setUpdatingId] = useState(null);
 
-
-  const load = () => {
-    setLoading(true);
+  // IMP-B2: skeletons only on first paint; later refreshes are silent
+  const load = (silent = false) => {
+    if (!silent) setLoading(true);
     api.get('/dashboard/stats')
-      .then(setStats)
+      .then(data => { setStats(data); setError(''); })
       .catch(err => setError(err.message || 'Failed to load dashboard'))
       .finally(() => setLoading(false));
   };
@@ -26,12 +29,16 @@ export default function Dashboard() {
   const showToast = useToast();
 
   const updateStatus = async (item, status) => {
+    if (!status || updatingId) return;
+    setUpdatingId(item._id); // IMP-B3: one in-flight change per row
     try {
       await api.put(`/events/items/${item._id}`, { status });
       showToast(`"${item.title}" → ${STATUS_LABEL(status)}`);
-      load();
+      await load(true);
     } catch (err) {
-      showToast(err.message || 'Update failed');
+      showToast(err.message || 'Update failed', 'error');
+    } finally {
+      setUpdatingId(null);
     }
   };
 
@@ -39,20 +46,15 @@ export default function Dashboard() {
     return (
       <div className="space-y-6">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-          {[...Array(6)].map((_, i) => <div key={i} className="h-24 animate-pulse rounded-xl border border-slate-200 bg-white" />)}
+          {[...Array(6)].map((_, i) => <SkeletonCard key={i} />)}
         </div>
-        <div className="h-48 animate-pulse rounded-xl border border-slate-200 bg-white" />
+        <SkeletonCard className="h-48" />
       </div>
     );
   }
 
   if (error) {
-    return (
-      <div className="rounded-xl border border-rose-200 bg-rose-50 p-8 text-center">
-        <p className="text-sm font-semibold text-rose-800">{error}</p>
-        <button onClick={load} className="mt-3 rounded-lg bg-rose-600 px-4 py-2 text-xs font-semibold text-white hover:bg-rose-500">Retry</button>
-      </div>
-    );
+    return <ErrorState message={error} onRetry={() => load()} />;
   }
 
   const myWork = stats.myWork || [];
@@ -79,7 +81,7 @@ export default function Dashboard() {
           <p className="mt-2 text-2xl font-bold text-blue-700">{stats.counters.inProgress}</p>
         </div>
         <div className="rounded-xl border border-rose-200 bg-rose-50/50 p-4 shadow-card">
-          <p className="flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-rose-700">Overdue <span className="rounded bg-rose-200 px-1 text-[9px] text-rose-800">Overlap</span></p>
+          <p className="flex items-center justify-between text-xs font-semibold uppercase tracking-wider text-rose-700">Overdue <span className="rounded bg-rose-200 px-1 text-[9px] normal-case text-rose-800">past due date</span></p>
           <p className="mt-2 text-2xl font-bold text-rose-800">{stats.counters.overdue}</p>
         </div>
         <div className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-4 shadow-card">
@@ -102,35 +104,30 @@ export default function Dashboard() {
         ) : (
           <div className="divide-y divide-slate-100">
             {myWork.map(item => (
-              <div key={item._id} className="flex flex-wrap items-center justify-between gap-3 py-3">
+              <div key={item._id} className={`flex flex-wrap items-center justify-between gap-3 py-3 ${item.isOverdue ? 'bg-rose-50/40' : ''}`}>
                 <div className="min-w-0">
                   <p className="truncate text-sm font-bold text-slate-900">{item.title}</p>
                   <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
                     <span>Event: <b className="text-slate-700">{item.eventTitle}</b></span>
                     {item.dueDate && (
-                      <span>Due: <b className={item.isOverdue ? 'font-bold text-rose-600' : 'text-slate-700'}>
-                        {new Date(item.dueDate).toLocaleDateString()}
-                      </b></span>
+                      <span className={item.isOverdue ? 'font-bold text-rose-600' : 'text-slate-700'}>
+                        <b>{relativeDate(item.dueDate)}</b> ({new Date(item.dueDate).toLocaleDateString()})
+                      </span>
                     )}
-                    {item.isOverdue && <span className="rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-red-800">Overdue</span>}
-                    <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold uppercase ${
-                      item.status === 'COMPLETED' ? 'bg-emerald-100 text-emerald-700'
-                      : item.status === 'IN_PROGRESS' ? 'bg-blue-100 text-blue-700'
-                      : item.status === 'BLOCKED' ? 'bg-rose-100 text-rose-700'
-                      : 'bg-slate-100 text-slate-600'}`}>
-                      {STATUS_LABEL(item.status)}
-                    </span>
+                    {item.isOverdue && <span className="rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-rose-800">Overdue</span>}
+                    <Chip kind={item.status}>{STATUS_LABEL(item.status)}</Chip>
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
                   {item.allowedTransitions.length > 0 ? (
                     <select
                       value=""
-                      onChange={e => e.target.value && updateStatus(item, e.target.value)}
-                      className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 shadow-sm focus:border-indigo-600 focus:outline-none"
+                      onChange={e => updateStatus(item, e.target.value)}
+                      disabled={updatingId === item._id}
+                      className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 shadow-sm focus:border-indigo-600 focus:outline-none disabled:opacity-50"
                       aria-label={`Change status of ${item.title}`}
                     >
-                      <option value="">Move to…</option>
+                      <option value="">{updatingId === item._id ? 'Updating…' : 'Move to…'}</option>
                       {item.allowedTransitions.map(s => (
                         <option key={s} value={s}>{STATUS_LABEL(s)}</option>
                       ))}
@@ -165,7 +162,7 @@ export default function Dashboard() {
               <div key={ev._id} className="flex items-center justify-between py-3">
                 <div>
                   <p className="text-sm font-bold text-slate-900">{ev.title}</p>
-                  <p className="text-xs text-slate-500">Starts: {new Date(ev.startDate).toLocaleDateString()} · {Math.round(ev.progressPercent || 0)}% complete</p>
+                  <p className="text-xs text-slate-500">Starts: {relativeDate(ev.startDate)} · {Math.round(ev.progressPercent || 0)}% complete</p>
                 </div>
                 <NavLink to={`/events/${ev._id}`} className="text-xs font-bold text-indigo-600 hover:underline">
                   View Execution

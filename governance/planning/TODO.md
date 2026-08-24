@@ -133,11 +133,77 @@ for traceability; the module table above governs sequencing.
       EVIDENCE 2026-08-24: 29 automated tests green (18 service-layer +
       11 HTTP-layer envelopes/RBAC/errors); `node scripts/dod-rehearsal.js`
       = **13/13 PASS** against isolated `organishift_dod` DB; vite build clean.
-- [ ] T-038 Deployment [BOTH]: client to static host, API to Node host, Atlas M0
-      (IP allow-list); `CLIENT_ORIGIN` + `VITE_API_URL` set to deployed URLs.
-      Done: login works in a private browser window against deployed URLs, no
-      cached state. (Depends T-037.)
-- [ ] T-039 Rehearsal [BOTH]: run §8.2 against the deployed build end-to-end;
-      take a DB snapshot afterwards; keep local + private-window fallback for free
-      host sleep. Done: all 13 verification rows pass and a snapshot restores the
-      demo in seconds. (Depends T-038.)
+- [x] T-038 Deployment — **OUT OF SCOPE FOR PHASE 1** (owner decision
+      2026-08-24: college project, no deployment in Phase 1; app stays local).
+      Kept as a Phase-2 candidate if wanted later.
+- [x] T-039 Deployed rehearsal — **OUT OF SCOPE FOR PHASE 1** (depends T-038;
+      same owner decision). Local 13-step DoD rehearsal already passed 13/13,
+      which covers the demo-verification intent for Phase 1.
+
+---
+
+# Improvement Cycle — Phase 1 polish (OWNER APPROVED 2026-08-24, all 4 batches; dark mode EXCLUDED)
+
+Source: full-app audit this date (backend quality/tests, frontend UX, docs).
+Classification: MINOR changes (no architecture/scope redesign); each item keeps
+existing acceptance criteria valid. Gate: CODING opens only on owner "code it".
+
+## Batch A — Backend correctness + tests
+- [x] IMP-A1 errorMiddleware: handle Mongoose ValidationError → clean 400
+      VALIDATION_ERROR envelope (currently unhandled → 500 + raw message leak,
+      e.g. PUT /events/:id {status:"XYZ"}).
+- [x] IMP-A2 Zod schema for addExecutionItem (title len, priority enum, dueDate).
+- [x] IMP-A3 Zod schemas for updatePlan / updateEvent / updateItem.
+- [x] IMP-A4 Wrap deleteEvent + deletePlan cascades in withTx (parity with
+      deleteExecutionItem).
+- [x] IMP-A5 Move copyFromLibrary logic into eventPlanService (~55 controller
+      lines → service per house rule), wrap in withTx.
+- [x] IMP-A6 Add ~12 tests: plan update/delete/copy-library; event update incl.
+      status enum + delete cascade + from/to list filters; add-execution-item
+      (valid + invalid priority/title); users CRUD happy path + deactivate;
+      dashboard stats endpoint shape.
+
+## Batch B — Frontend correctness (user-facing bugs)
+- [x] IMP-B1 EventPlans / ExecutionHub / Calendar: fetch errors currently render
+      fake empty states (.catch(()=>set([]))) → route through ErrorState+Retry.
+- [x] IMP-B2 Dashboard + PlanningLibrary: silent refetch after mutations (no
+      full-page skeleton flash; skeletons first paint only).
+- [x] IMP-B3 Double-submit locks on mutation buttons (pattern already in
+      Calendar scheduling flag) across Library/EventPlans/EventExecution/Dashboard.
+- [x] IMP-B4 Modal + mobile drawer: Escape-close, initial/return focus,
+      background scroll lock, closed drawer not keyboard-focusable.
+- [x] IMP-B5 Rename/add modals: disable Save on empty input + hint (Library).
+- [x] IMP-B6 EventExecution STATUS_STYLES: add ONGOING/DONE keys (match legend/hub).
+- [x] IMP-B7 EventExecution: due-date/OVERDUE cluster visible on mobile.
+
+## Batch C — UI polish (no dark mode)
+- [x] IMP-C1 Shared Badge/chip component + single status/priority map; adopt in
+      Dashboard/ExecutionHub/EventExecution/Calendar; fix red-vs-rose drift;
+      relabel cryptic "Overlap" tag.
+- [x] IMP-C2 Standardize primary button = indigo (fix emerald "Add module").
+- [x] IMP-C3 Adopt EmptyState/ErrorState everywhere (Dashboard inline copies,
+      ExecutionHub ad-hoc empties); use SkeletonCard variants consistently.
+- [x] IMP-C4 Shared keyboard-operable Menu for kebab dropdowns (Escape/arrows/
+      outside-click/focus return).
+- [x] IMP-C5 Library move picker: filter out own subtree client-side.
+- [x] IMP-C6 Toast: longer timeout + manual close for errors; success icon.
+- [x] IMP-C7 Breadcrumb shows event title on /events/:id; crumb for plan builder.
+- [x] IMP-C8 Contrast fixes: slate-400→500 hints, sky-600→700 MEDIUM chips (WCAG AA).
+- [x] IMP-C9 Relative due dates helper ("in 3 days"/"2 days late"); overdue row tint.
+- [x] IMP-C10 Plan builder URL-addressable (?plan= or /event-plans/:id).
+- [x] IMP-C11 Progress bars: one shared visual+a11y wrapper; "+N more" calendar
+      overflow clickable day-popover.
+
+## Batch D — Submission docs (examiner-facing; none exist today)
+- [x] IMP-D1 Root README.md: problem statement, features, stack table,
+      architecture diagram, roles, screenshots placeholders, quick-start (start.bat).
+- [x] IMP-D2 Corrected SETUP guide at root (fix stale root-npm commands, broken
+      :5000 line, 4 seed accounts, no-event seed claim, both test files).
+- [x] IMP-D3 docs/API-DOCS.md: all ~29 endpoints (method/path/Roles/envelopes).
+- [x] IMP-D4 docs/DATA-MODEL.md: 5 collections, materialized-path tree, scopes,
+      relations, indexes.
+- [x] IMP-D5 docs/DEMO-SCRIPT.md: 13-step walkthrough w/ seeded logins + RBAC proof.
+- [x] IMP-D6 docs/VIVA-NOTES.md: anticipated Q&A grounded in codebase decisions.
+
+Verification standard for this cycle: `npm test` all green (29 + new ~12),
+client build clean, DoD rehearsal still 13/13, docs reviewed by owner.

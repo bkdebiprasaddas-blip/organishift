@@ -1,76 +1,111 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import {
   ClipboardList, ArrowLeft, ChevronRight, Folder, FolderOpen,
-  FileText, EllipsisVertical, FolderPlus, Trash2, Plus, DownloadCloud
+  FileText, FolderPlus, Trash2, Plus, DownloadCloud
 } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/common/Toast';
 import TreeView from '../components/common/TreeView';
-import { Modal, ConfirmDialog, EmptyState, Spinner } from '../components/common';
+import DropdownMenu from '../components/common/DropdownMenu';
+import { Modal, ConfirmDialog, EmptyState, ErrorState, SkeletonCard } from '../components/common';
 
 export default function EventPlans() {
   const { user } = useAuth();
   const isAdmin = user?.role === 'ADMIN';
-  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  // IMP-C10: open plan lives in the URL (?plan=<id>) — refresh/back/bookmark safe
+  const selectedId = searchParams.get('plan');
 
   const [plans, setPlans] = useState([]);
-  const [selectedId, setSelectedId] = useState(null);
   const [planTree, setPlanTree] = useState([]);
   const [libraryRoots, setLibraryRoots] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [plansError, setPlansError] = useState('');
+  const [itemsError, setItemsError] = useState('');
   const [collapsed, setCollapsed] = useState({});
-  const [kebabId, setKebabId] = useState(null);
   const [modal, setModal] = useState(null);   // create-plan | add | import
   const [confirm, setConfirm] = useState(null); // delete-plan | delete-item
+  const [busy, setBusy] = useState(false);
 
   const toast = useToast();
 
-  const loadPlans = () =>
-    api.get('/event-plans').then(setPlans).catch(() => setPlans([])).finally(() => setLoading(false));
+  // IMP-B1: surface load errors instead of faking an empty list
+  const loadPlans = () => {
+    setLoading(true);
+    setPlansError('');
+    api.get('/event-plans')
+      .then(setPlans)
+      .catch(err => setPlansError(err.message || 'Failed to load plans'))
+      .finally(() => setLoading(false));
+  };
 
   const loadPlanItems = useCallback(id => {
-    if (!id) return;
+    if (!id) {
+      setPlanTree([]);
+      return;
+    }
+    setItemsError('');
     api.get('/planning-items', { params: { scope: 'PLAN', planId: id } })
       .then(setPlanTree)
-      .catch(() => setPlanTree([]));
+      .catch(err => setItemsError(err.message || 'Failed to load plan modules'));
   }, []);
 
   useEffect(() => { loadPlans(); }, []);
   useEffect(() => { loadPlanItems(selectedId); }, [selectedId, loadPlanItems]);
 
+  // Stale ?plan=<deleted id> -> fall back to the grid
   useEffect(() => {
-    const close = e => { if (!e.target.closest('[data-kebab]')) setKebabId(null); };
-    document.addEventListener('mousedown', close);
-    return () => document.removeEventListener('mousedown', close);
-  }, []);
+    if (selectedId && !loading && !plansError && plans.length > 0 && !plans.some(p => p._id === selectedId)) {
+      setSearchParams({});
+    }
+  }, [selectedId, loading, plansError, plans, setSearchParams]);
 
-  const createPlan = async () => {
+  const selectPlan = id => {
+    setCollapsed({});
+    if (id) setSearchParams({ plan: id });
+    else setSearchParams({});
+  };
+
+  const runAction = async fn => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await fn();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const createPlan = () => runAction(async () => {
     try {
       const created = await api.post('/event-plans', {
         title: modal.title.trim(),
         category: modal.category.trim() || 'General',
         description: modal.description.trim()
       });
-      await loadPlans();
+      await new Promise(resolve => {
+        api.get('/event-plans').then(data => { setPlans(data); resolve(); }).catch(resolve);
+      });
       setModal(null);
-      setSelectedId(created._id);
+      selectPlan(created._id);
       toast(`Created "${created.title}"`);
     } catch (err) { toast(err.message || 'Create failed', 'error'); }
-  };
+  });
 
-  const deletePlan = async () => {
+  const deletePlan = () => runAction(async () => {
     try {
       await api.delete(`/event-plans/${confirm.plan._id}`);
       setConfirm(null);
-      setSelectedId(null);
-      await loadPlans();
+      selectPlan(null);
+      loadPlans();
       toast('Plan deleted');
     } catch (err) { setConfirm(null); toast(err.message || 'Delete failed', 'error'); }
-  };
+  });
 
-  const addCustomItem = async () => {
+  const addCustomItem = () => runAction(async () => {
     const title = modal?.title?.trim();
     if (!title) return;
     try {
@@ -80,15 +115,15 @@ export default function EventPlans() {
       setModal(null); loadPlanItems(selectedId);
       toast(`Added "${title}"`);
     } catch (err) { toast(err.message || 'Add failed', 'error'); }
-  };
+  });
 
-  const deleteItem = async () => {
+  const deleteItem = () => runAction(async () => {
     try {
       await api.delete(`/planning-items/${confirm.item._id}`);
       setConfirm(null); loadPlanItems(selectedId);
       toast('Item deleted from blueprint');
     } catch (err) { setConfirm(null); toast(err.message || 'Delete failed', 'error'); }
-  };
+  });
 
   const openImportDialog = async () => {
     try {
@@ -98,13 +133,13 @@ export default function EventPlans() {
     } catch (err) { toast(err.message || 'Could not load library', 'error'); }
   };
 
-  const importModule = async libRoot => {
+  const importModule = libRoot => runAction(async () => {
     try {
       const res = await api.post(`/event-plans/${selectedId}/items/from-library`, { libraryItemId: libRoot._id });
       setModal(null); loadPlanItems(selectedId);
       toast(res.copiedCount ? `Imported ${res.copiedCount} items` : 'Module imported');
     } catch (err) { toast(err.message || 'Import failed', 'error'); }
-  };
+  });
 
   const countAll = n => n.children.reduce((acc, c) => acc + 1 + countAll(c), 0);
 
@@ -116,7 +151,7 @@ export default function EventPlans() {
       <div className="space-y-6">
         <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-card">
           <div className="flex min-w-0 items-center gap-3">
-            <button onClick={() => setSelectedId(null)} aria-label="Back to all plans"
+            <button onClick={() => selectPlan(null)} aria-label="Back to all plans"
               className="min-h-[40px] rounded-lg border border-slate-300 bg-white p-2 text-slate-500 transition hover:bg-slate-50 hover:text-indigo-600">
               <ArrowLeft className="h-4 w-4" />
             </button>
@@ -142,80 +177,81 @@ export default function EventPlans() {
         </div>
 
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-card">
-          {planTree.length > 0 && (
-            <div className="mb-3 flex items-center justify-between border-b border-slate-100 pb-3">
-              <h3 className="text-sm font-bold text-slate-900">Plan Structure</h3>
-              <div className="flex gap-1.5">
-                <button onClick={() => setCollapsed({})} className="min-h-[32px] rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50">Expand All</button>
-                <button onClick={() => {
-                  const next = {};
-                  const walk = nodes => nodes.forEach(n => { if (n.children.length) { next[n._id] = true; walk(n.children); } });
-                  walk(planTree);
-                  setCollapsed(next);
-                }} className="min-h-[32px] rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50">Collapse All</button>
-              </div>
-            </div>
-          )}
-
-          {planTree.length === 0 ? (
-            <EmptyState
-              icon={FolderPlus}
-              title="No modules in this plan yet"
-              hint={<span>Use <b>+ Add Custom Module</b> to build from scratch or <b>+ Import Library Module</b> to copy master templates.</span>}
-            />
+          {itemsError ? (
+            <ErrorState message={itemsError} onRetry={() => loadPlanItems(selectedId)} />
           ) : (
-            <TreeView
-              nodes={planTree}
-              isCollapsed={n => !!collapsed[n._id]}
-              onToggle={id => setCollapsed(c => ({ ...c, [id]: !c[id] }))}
-              rowClassName={() => 'bg-slate-50 hover:bg-indigo-50/50'}
-              renderMain={(node, { hasKids }) => {
-                const isCol = !!collapsed[node._id];
-                const isLib = node.source === 'LIBRARY';
-                return (
-                  <>
-                    {hasKids
-                      ? (isCol ? <Folder className={`h-4 w-4 shrink-0 ${isLib ? 'text-indigo-600' : 'text-emerald-600'}`} /> : <FolderOpen className={`h-4 w-4 shrink-0 ${isLib ? 'text-indigo-600' : 'text-emerald-600'}`} />)
-                      : <FileText className={`h-4 w-4 shrink-0 ${isLib ? 'text-indigo-600' : 'text-emerald-600'}`} />}
-                    <span className="truncate text-xs font-semibold text-slate-800">{node.title}</span>
-                    <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-bold uppercase ${isLib ? 'border-indigo-200 bg-indigo-50 text-indigo-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
-                      {isLib ? 'Library' : 'Custom'}
-                    </span>
-                  </>
-                );
-              }}
-              renderActions={isAdmin ? (node) => (
-                <>
-                  <button
-                    data-kebab
-                    aria-label={`Actions for ${node.title}`}
-                    onClick={e => { e.stopPropagation(); setKebabId(kebabId === node._id ? null : node._id); }}
-                    className={`min-h-[32px] min-w-[32px] rounded p-1.5 text-slate-400 opacity-0 transition hover:bg-slate-200 hover:text-slate-700 focus:opacity-100 group-hover:opacity-100 ${kebabId === node._id ? '!opacity-100' : ''}`}
-                  >
-                    <EllipsisVertical className="h-4 w-4" />
-                  </button>
-                  {kebabId === node._id && (
-                    <div data-kebab className="absolute right-3 top-11 z-20 w-44 rounded-xl border border-slate-200 bg-white py-1.5 shadow-lg">
-                      <button onClick={() => { setKebabId(null); setModal({ type: 'add', node, title: '' }); }} className="flex w-full items-center gap-2.5 px-3 py-2.5 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700">
-                        <FolderPlus className="h-3.5 w-3.5" />Add Child
-                      </button>
-                      <div className="mx-2 my-1 border-t border-slate-100" />
-                      <button onClick={() => { setKebabId(null); setConfirm({ type: 'delete-item', item: node, total: 1 + countAll(node) }); }} className="flex w-full items-center gap-2.5 px-3 py-2.5 text-xs font-semibold text-rose-600 hover:bg-rose-50">
-                        <Trash2 className="h-3.5 w-3.5" />Delete
+            <>
+              {planTree.length > 0 && (
+                <div className="mb-3 flex items-center justify-between border-b border-slate-100 pb-3">
+                  <h3 className="text-sm font-bold text-slate-900">Plan Structure</h3>
+                  <div className="flex gap-1.5">
+                    <button onClick={() => setCollapsed({})} className="min-h-[32px] rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50">Expand All</button>
+                    <button onClick={() => {
+                      const next = {};
+                      const walk = nodes => nodes.forEach(n => { if (n.children.length) { next[n._id] = true; walk(n.children); } });
+                      walk(planTree);
+                      setCollapsed(next);
+                    }} className="min-h-[32px] rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-50">Collapse All</button>
+                  </div>
+                </div>
+              )}
+
+              {planTree.length === 0 ? (
+                <EmptyState
+                  icon={FolderPlus}
+                  title="No modules in this plan yet"
+                  hint={<span>Use <b>+ Add Custom Module</b> to build from scratch or <b>+ Import Library Module</b> to copy master templates.</span>}
+                />
+              ) : (
+                <TreeView
+                  nodes={planTree}
+                  isCollapsed={n => !!collapsed[n._id]}
+                  onToggle={id => setCollapsed(c => ({ ...c, [id]: !c[id] }))}
+                  rowClassName={() => 'bg-slate-50 hover:bg-indigo-50/50'}
+                  renderMain={(node, { hasKids }) => {
+                    const isCol = !!collapsed[node._id];
+                    const isLib = node.source === 'LIBRARY';
+                    return (
+                      <>
+                        {hasKids
+                          ? (isCol ? <Folder className={`h-4 w-4 shrink-0 ${isLib ? 'text-indigo-600' : 'text-emerald-600'}`} /> : <FolderOpen className={`h-4 w-4 shrink-0 ${isLib ? 'text-indigo-600' : 'text-emerald-600'}`} />)
+                          : <FileText className={`h-4 w-4 shrink-0 ${isLib ? 'text-indigo-600' : 'text-emerald-600'}`} />}
+                        <span className="truncate text-xs font-semibold text-slate-800">{node.title}</span>
+                        <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-bold uppercase ${isLib ? 'border-indigo-200 bg-indigo-50 text-indigo-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+                          {isLib ? 'Library' : 'Custom'}
+                        </span>
+                      </>
+                    );
+                  }}
+                  renderActions={isAdmin ? (node) => (
+                    <DropdownMenu
+                      label={`Actions for ${node.title}`}
+                      buttonClassName="min-h-[32px] min-w-[32px] rounded p-1.5 text-slate-400 opacity-0 transition hover:bg-slate-200 hover:text-slate-700 focus:opacity-100 group-hover:opacity-100"
+                    >
+                      {close => (
+                        <>
+                          <button role="menuitem" onClick={() => { close(); setModal({ type: 'add', node, title: '' }); }} className="flex w-full items-center gap-2.5 px-3 py-2.5 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700">
+                            <FolderPlus className="h-3.5 w-3.5" />Add Child
+                          </button>
+                          <div className="mx-2 my-1 border-t border-slate-100" />
+                          <button role="menuitem" onClick={() => { close(); setConfirm({ type: 'delete-item', item: node, total: 1 + countAll(node) }); }} className="flex w-full items-center gap-2.5 px-3 py-2.5 text-xs font-semibold text-rose-600 hover:bg-rose-50">
+                            <Trash2 className="h-3.5 w-3.5" />Delete
+                          </button>
+                        </>
+                      )}
+                    </DropdownMenu>
+                  ) : undefined}
+                  renderCollapsed={node => (
+                    <div className="ml-[11px] pl-5">
+                      <button onClick={() => setCollapsed(c => ({ ...c, [node._id]: false }))}
+                        className="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-500 hover:bg-slate-200">
+                        {node.children.length} hidden
                       </button>
                     </div>
                   )}
-                </>
-              ) : undefined}
-              renderCollapsed={node => (
-                <div className="ml-[11px] pl-5">
-                  <button onClick={() => setCollapsed(c => ({ ...c, [node._id]: false }))}
-                    className="rounded-md bg-slate-100 px-2 py-1 text-[10px] font-bold text-slate-500 hover:bg-slate-200">
-                    {node.children.length} hidden
-                  </button>
-                </div>
+                />
               )}
-            />
+            </>
           )}
         </div>
 
@@ -223,12 +259,14 @@ export default function EventPlans() {
           <Modal onClose={() => setModal(null)} labelledBy="plan-add-title">
             <h3 id="plan-add-title" className="mb-3 text-base font-bold text-slate-900">Add Custom Module</h3>
             <input autoFocus value={modal.title} onChange={e => setModal(m => ({ ...m, title: e.target.value }))}
-              onKeyDown={e => e.key === 'Enter' && addCustomItem()}
+              onKeyDown={e => e.key === 'Enter' && !busy && modal.title.trim() && addCustomItem()}
               placeholder="e.g. Security & Entrance Gate Setup" aria-label="Module title"
-              className="w-full rounded-lg border border-slate-300 p-2.5 text-xs font-semibold" />
+              aria-invalid={!modal.title.trim()}
+              className={`w-full rounded-lg border p-2.5 text-xs font-semibold ${modal.title.trim() ? 'border-slate-300' : 'border-rose-300'}`} />
+            {!modal.title.trim() && <p className="mt-1.5 text-[11px] font-medium text-rose-600">Title is required.</p>}
             <div className="mt-5 flex justify-end gap-2">
               <button onClick={() => setModal(null)} className="min-h-[36px] px-3 py-1.5 text-xs font-semibold text-slate-600">Cancel</button>
-              <button onClick={addCustomItem} className="min-h-[36px] rounded-lg bg-emerald-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm">Add</button>
+              <button onClick={addCustomItem} disabled={busy || !modal.title.trim()} className="min-h-[36px] rounded-lg bg-indigo-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm disabled:opacity-50">{busy ? 'Adding…' : 'Add'}</button>
             </div>
           </Modal>
         )}
@@ -264,7 +302,7 @@ export default function EventPlans() {
                     <p className="truncate text-xs font-bold text-slate-900">{root.title}</p>
                     <p className="text-[11px] text-slate-500">{countAll(root) + 1} items included</p>
                   </div>
-                  <button onClick={() => importModule(root)} className="min-h-[36px] shrink-0 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-indigo-500">Import</button>
+                  <button onClick={() => importModule(root)} disabled={busy} className="min-h-[36px] shrink-0 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-indigo-500 disabled:opacity-50">Import</button>
                 </div>
               ))}
             </div>
@@ -295,8 +333,10 @@ export default function EventPlans() {
 
       {loading ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {[1, 2, 3].map(i => <div key={i} className="h-48 animate-pulse rounded-xl border border-slate-200 bg-white" />)}
+          {[1, 2, 3].map(i => <SkeletonCard key={i} className="h-48" />)}
         </div>
+      ) : plansError ? (
+        <ErrorState message={plansError} onRetry={loadPlans} />
       ) : plans.length === 0 ? (
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-card">
           <EmptyState
@@ -308,7 +348,7 @@ export default function EventPlans() {
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {plans.map(p => (
-            <button key={p._id} onClick={() => { setSelectedId(p._id); setCollapsed({}); }}
+            <button key={p._id} onClick={() => selectPlan(p._id)}
               className="group relative cursor-pointer space-y-3 rounded-xl border border-slate-200 bg-white p-5 text-left shadow-card transition hover:border-indigo-300 hover:shadow-md">
               <div className="flex items-start justify-between">
                 <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 ring-1 ring-inset ring-indigo-100 transition group-hover:bg-indigo-600 group-hover:text-white">
@@ -331,7 +371,7 @@ export default function EventPlans() {
           <h3 id="create-plan-title" className="mb-3 text-base font-bold text-slate-900">Create New Event Plan</h3>
           <div className="space-y-3">
             <input value={modal.title} onChange={e => setModal(m => ({ ...m, title: e.target.value }))}
-              onKeyDown={e => e.key === 'Enter' && createPlan()}
+              onKeyDown={e => e.key === 'Enter' && !busy && modal.title.trim() && createPlan()}
               placeholder="Plan title (e.g. Annual Cultural Fest 2026)" aria-label="Plan title"
               className="w-full rounded-lg border border-slate-300 p-2.5 text-xs font-semibold" />
             <input value={modal.category} onChange={e => setModal(m => ({ ...m, category: e.target.value }))}
@@ -343,7 +383,7 @@ export default function EventPlans() {
           </div>
           <div className="mt-5 flex justify-end gap-2">
             <button onClick={() => setModal(null)} className="min-h-[36px] px-3 py-1.5 text-xs font-semibold text-slate-600">Cancel</button>
-            <button onClick={createPlan} disabled={!modal.title.trim()} className="min-h-[36px] rounded-lg bg-indigo-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm disabled:opacity-50">Create Plan</button>
+            <button onClick={createPlan} disabled={busy || !modal.title.trim()} className="min-h-[36px] rounded-lg bg-indigo-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm disabled:opacity-50">{busy ? 'Creating…' : 'Create Plan'}</button>
           </div>
         </Modal>
       )}

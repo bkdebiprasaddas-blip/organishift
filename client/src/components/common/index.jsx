@@ -1,7 +1,63 @@
+import { useEffect, useRef } from 'react';
+
+/**
+ * Accessible modal (IMP-B4): Escape closes, focus is trapped inside and
+ * returned to the trigger on close, background scroll is locked.
+ */
 export function Modal({ onClose, children, labelledBy, wide = false }) {
+  const panelRef = useRef(null);
+
+  useEffect(() => {
+    const previouslyFocused = document.activeElement;
+    const panel = panelRef.current;
+    if (panel) {
+      const first = panel.querySelector(
+        'input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled])'
+      );
+      first?.focus();
+    }
+
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const onKeyDown = e => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose?.();
+        return;
+      }
+      if (e.key !== 'Tab' || !panel) return;
+      const focusables = Array.from(
+        panel.querySelectorAll(
+          'input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])'
+        )
+      );
+      if (!focusables.length) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = prevOverflow;
+      if (previouslyFocused && typeof previouslyFocused.focus === 'function') {
+        previouslyFocused.focus();
+      }
+    };
+  }, [onClose]);
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onMouseDown={onClose}>
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-labelledby={labelledBy}
@@ -52,7 +108,7 @@ export function EmptyState({ icon: Icon, title, hint, action }) {
     <div className="py-12 text-center">
       {Icon && <Icon className="mx-auto h-10 w-10 text-slate-300" aria-hidden="true" />}
       <p className="mt-3 text-sm font-semibold text-slate-600">{title}</p>
-      {hint && <p className="mt-1 text-xs text-slate-400">{hint}</p>}
+      {hint && <p className="mt-1 text-xs text-slate-500">{hint}</p>}
       {action && <div className="mt-4 flex justify-center">{action}</div>}
     </div>
   );
@@ -78,3 +134,6 @@ export function ForbiddenNote({ children }) {
     </p>
   );
 }
+
+export { default as DropdownMenu } from './DropdownMenu';
+export { Chip, STATUS_CHIP, PRIORITY_TEXT } from './chips';

@@ -163,3 +163,245 @@ test('H-11: unknown API route -> 404 JSON envelope (never HTML)', async () => {
   assert.strictEqual(json.success, false);
   assert.strictEqual(json.error.code, 'NOT_FOUND');
 });
+
+// ---- Improvement cycle IMP-A6 (2026-08-24): coverage gaps closed below ----
+
+async function makeLibraryBranch(title) {
+  const root = (await req('POST', '/api/planning-items', {
+    token: adminToken, body: { title: `${title} Root`, scope: 'LIBRARY' }
+  })).json.data;
+  await req('POST', '/api/planning-items', {
+    token: adminToken, body: { title: `${title} Child`, scope: 'LIBRARY', parentId: root._id }
+  });
+  return root._id;
+}
+
+test('H-12: updatePlan happy path + too-short title -> 400 VALIDATION_ERROR', async () => {
+  const plan = (await req('POST', '/api/event-plans', {
+    token: adminToken, body: { title: 'Updatable Plan' }
+  })).json.data;
+
+  const ok = await req('PUT', `/api/event-plans/${plan._id}`, {
+    token: adminToken, body: { title: 'Renamed Plan', category: 'Sports' }
+  });
+  assert.strictEqual(ok.status, 200);
+  assert.strictEqual(ok.json.data.title, 'Renamed Plan');
+
+  const bad = await req('PUT', `/api/event-plans/${plan._id}`, {
+    token: adminToken, body: { title: 'ab' }
+  });
+  assert.strictEqual(bad.status, 400);
+  assert.strictEqual(bad.json.error.code, 'VALIDATION_ERROR');
+});
+
+test('H-13: malformed ObjectId param -> 400 INVALID_ID (never 500)', async () => {
+  const { status, json } = await req('GET', '/api/event-plans/not-an-object-id', { token: adminToken });
+  assert.strictEqual(status, 400);
+  assert.strictEqual(json.error.code, 'INVALID_ID');
+});
+
+test('H-14: whitespace-only execution item title -> 400 VALIDATION_ERROR (schema validation)', async () => {
+  const libRoot = await makeLibraryBranch('Ws');
+  const plan = (await req('POST', '/api/event-plans', {
+    token: adminToken, body: { title: 'WS Plan' }
+  })).json.data;
+  const future = '2030-06-01';
+  const event = (await req('POST', '/api/events', {
+    token: managerToken, body: { title: 'WS Event', planId: plan._id, startDate: future }
+  })).json.data;
+
+  const { status, json } = await req('POST', `/api/events/${event.event._id}/items`, {
+    token: managerToken, body: { title: '   ' }
+  });
+  assert.strictEqual(status, 400);
+  assert.strictEqual(json.error.code, 'VALIDATION_ERROR');
+  void libRoot;
+});
+
+test('H-15: addExecutionItem invalid priority -> 400; valid -> 201 + progress recalculated', async () => {
+  const plan = (await req('POST', '/api/event-plans', {
+    token: adminToken, body: { title: 'Item Plan' }
+  })).json.data;
+  const event = (await req('POST', '/api/events', {
+    token: managerToken,
+    body: { title: 'Item Event', planId: plan._id, startDate: '2030-07-01' }
+  })).json.data;
+  const eventId = event.event._id;
+
+  const badPrio = await req('POST', `/api/events/${eventId}/items`, {
+    token: managerToken, body: { title: 'Leaf A', priority: 'URGENT' }
+  });
+  assert.strictEqual(badPrio.status, 400);
+  assert.strictEqual(badPrio.json.error.code, 'VALIDATION_ERROR');
+
+  const ok = await req('POST', `/api/events/${eventId}/items`, {
+    token: managerToken,
+    body: { title: 'Leaf A', priority: 'HIGH', dueDate: '2030-07-10' }
+  });
+  assert.strictEqual(ok.status, 201);
+  assert.strictEqual(ok.json.data.priority, 'HIGH');
+  assert.strictEqual(ok.json.data.status, 'NOT_STARTED');
+
+  const progress = (await req('GET', `/api/events/${eventId}/progress`, { token: memberToken })).json.data;
+  assert.strictEqual(typeof progress.eventProgress, 'number');
+  assert.ok(progress.tree.length >= 1);
+});
+
+test('H-16: updateEvent rejects bad status enum -> 400; legal ONGOING->DONE -> 200', async () => {
+  const plan = (await req('POST', '/api/event-plans', {
+    token: adminToken, body: { title: 'Status Plan' }
+  })).json.data;
+  const event = (await req('POST', '/api/events', {
+    token: managerToken,
+    body: { title: 'Status Event', planId: plan._id, startDate: '2030-08-01' }
+  })).json.data;
+  const id = event.event._id;
+
+  const badStatus = await req('PUT', `/api/events/${id}`, {
+    token: managerToken, body: { status: 'XYZ' }
+  });
+  assert.strictEqual(badStatus.status, 400);
+  assert.strictEqual(badStatus.json.error.code, 'VALIDATION_ERROR');
+
+  const ongoing = await req('PUT', `/api/events/${id}`, {
+    token: managerToken, body: { status: 'ONGOING' }
+  });
+  assert.strictEqual(ongoing.status, 200);
+  assert.strictEqual(ongoing.json.data.status, 'ONGOING');
+
+  const done = await req('PUT', `/api/events/${id}`, {
+    token: managerToken, body: { status: 'DONE' }
+  });
+  assert.strictEqual(done.status, 200);
+  assert.strictEqual(done.json.data.status, 'DONE');
+});
+
+test('H-17: GET /api/events?from=&to= date filtering works', async () => {
+  const plan = (await req('POST', '/api/event-plans', {
+    token: adminToken, body: { title: 'Filter Plan' }
+  })).json.data;
+  await req('POST', '/api/events', {
+    token: managerToken,
+    body: { title: 'July Event', planId: plan._id, startDate: '2030-07-15' }
+  });
+  await req('POST', '/api/events', {
+    token: managerToken,
+    body: { title: 'Dec Event', planId: plan._id, startDate: '2030-12-15' }
+  });
+
+  const all = (await req('GET', '/api/events', { token: memberToken })).json.data;
+  assert.ok(Array.isArray(all) && all.length >= 2);
+
+  const filtered = (await req(
+    'GET',
+    '/api/events?from=2030-07-01&to=2030-07-31',
+    { token: memberToken }
+  )).json.data;
+  assert.ok(filtered.every(e => e.startDate >= '2030-07' && e.startDate < '2030-08'));
+  assert.ok(filtered.length >= 1);
+});
+
+test('H-18: deleteEvent cascades — zero orphan execution items remain', async () => {
+  const EventItem = require('../src/models/EventItem');
+  const libRoot = await makeLibraryBranch('DelEv');
+  const plan = (await req('POST', '/api/event-plans', {
+    token: adminToken, body: { title: 'Cascade Plan' }
+  })).json.data;
+  await req('POST', `/api/event-plans/${plan._id}/items/from-library`, {
+    token: adminToken, body: { libraryItemId: libRoot }
+  });
+  const event = (await req('POST', '/api/events', {
+    token: managerToken,
+    body: { title: 'Doomed Event', planId: plan._id, startDate: '2030-09-01' }
+  })).json.data;
+  const eventId = event.event._id;
+  const before = await EventItem.countDocuments({ eventId });
+  assert.ok(before > 0);
+
+  const del = await req('DELETE', `/api/events/${eventId}`, { token: adminToken });
+  assert.strictEqual(del.status, 200);
+
+  const after = await EventItem.countDocuments({ eventId: eventId });
+  assert.strictEqual(after, 0);
+  const gone = await req('GET', `/api/events/${eventId}`, { token: adminToken });
+  assert.strictEqual(gone.status, 404);
+});
+
+test('H-19: copyFromLibrary over HTTP copies branch into plan; unknown library id -> 404', async () => {
+  const libRoot = await makeLibraryBranch('Copy');
+  const plan = (await req('POST', '/api/event-plans', {
+    token: adminToken, body: { title: 'Copy Target Plan' }
+  })).json.data;
+
+  const missing = await req('POST', `/api/event-plans/${plan._id}/items/from-library`, {
+    token: adminToken, body: { libraryItemId: libRoot.replace(/.$/, c => c === '0' ? '1' : '0') }
+  });
+  assert.ok([404].includes(missing.status));
+
+  const copy = await req('POST', `/api/event-plans/${plan._id}/items/from-library`, {
+    token: adminToken, body: { libraryItemId: libRoot }
+  });
+  assert.strictEqual(copy.status, 201);
+  assert.strictEqual(copy.json.data.copiedCount, 2);
+
+  const detail = (await req('GET', `/api/event-plans/${plan._id}`, { token: adminToken })).json.data;
+  assert.strictEqual(detail.tree.length, 1);
+  assert.strictEqual(detail.tree[0].children.length, 1);
+});
+
+test('H-20: deletePlan cascades — plan gone, its PLAN-scope items removed', async () => {
+  const PlanningItem = require('../src/models/PlanningItem');
+  const libRoot = await makeLibraryBranch('DelPlan');
+  const plan = (await req('POST', '/api/event-plans', {
+    token: adminToken, body: { title: 'Doomed Plan' }
+  })).json.data;
+  await req('POST', `/api/event-plans/${plan._id}/items/from-library`, {
+    token: adminToken, body: { libraryItemId: libRoot }
+  });
+
+  const del = await req('DELETE', `/api/event-plans/${plan._id}`, { token: adminToken });
+  assert.strictEqual(del.status, 200);
+
+  const gone = await req('GET', `/api/event-plans/${plan._id}`, { token: adminToken });
+  assert.strictEqual(gone.status, 404);
+  const leftovers = await PlanningItem.countDocuments({ planId: plan._id, scope: 'PLAN' });
+  assert.strictEqual(leftovers, 0);
+});
+
+test('H-21: users lifecycle — create 201, duplicate 409, update role, deactivate blocks login', async () => {
+  const created = await req('POST', '/api/users', {
+    token: adminToken,
+    body: { name: 'Temp User', email: 'temp@t.com', password: 'Temp12345', role: 'MEMBER' }
+  });
+  assert.strictEqual(created.status, 201);
+  assert.strictEqual(created.json.data.passwordHash, undefined);
+  const uid = created.json.data._id;
+
+  const dup = await req('POST', '/api/users', {
+    token: adminToken,
+    body: { name: 'Dup User', email: 'temp@t.com', password: 'Temp12345' }
+  });
+  assert.strictEqual(dup.status, 409);
+
+  const promoted = await req('PUT', `/api/users/${uid}`, {
+    token: adminToken, body: { role: 'MANAGER' }
+  });
+  assert.strictEqual(promoted.status, 200);
+  assert.strictEqual(promoted.json.data.role, 'MANAGER');
+
+  const deactivated = await req('DELETE', `/api/users/${uid}`, { token: adminToken });
+  assert.strictEqual(deactivated.status, 200);
+
+  const loginDead = await req('POST', '/api/auth/login', {
+    body: { email: 'temp@t.com', password: 'Temp12345' }
+  });
+  assert.strictEqual(loginDead.status, 401);
+});
+
+test('H-22: dashboard stats endpoint returns success envelope with counter fields', async () => {
+  const { status, json } = await req('GET', '/api/dashboard/stats', { token: adminToken });
+  assert.strictEqual(status, 200);
+  assert.strictEqual(json.success, true);
+  assert.ok(typeof json.data === 'object');
+  assert.ok(!JSON.stringify(json.data).includes('passwordHash'));
+});

@@ -1,28 +1,28 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CalendarDays, Plus, Inbox } from 'lucide-react';
+import { CalendarDays, Inbox } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
-
-const STATUS_STYLES = {
-  PLANNED: 'bg-slate-100 text-slate-600 border-slate-200',
-  ONGOING: 'bg-blue-50 text-blue-700 border-blue-200',
-  DONE: 'bg-emerald-50 text-emerald-700 border-emerald-200'
-};
+import { Chip, EmptyState, ErrorState, SkeletonCard } from '../components/common';
 
 export default function ExecutionHub() {
   const [events, setEvents] = useState([]);
   const [filter, setFilter] = useState('ALL');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const navigate = useNavigate();
   const { user } = useAuth();
 
-  useEffect(() => {
+  const load = () => {
+    setLoading(true);
+    setError('');
     api.get('/events')
       .then(setEvents)
-      .catch(() => setEvents([]))
+      .catch(err => setError(err.message || 'Failed to load events'))
       .finally(() => setLoading(false));
-  }, []);
+  };
+
+  useEffect(() => { load(); }, []);
 
   const filtered = filter === 'ALL' ? events : events.filter(e => e.status === filter);
 
@@ -48,19 +48,19 @@ export default function ExecutionHub() {
 
       {loading ? (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {[1, 2, 3].map(i => (
-            <div key={i} className="h-44 animate-pulse rounded-xl border border-slate-200 bg-white" />
-          ))}
+          {[1, 2, 3].map(i => <SkeletonCard key={i} className="h-44" />)}
         </div>
+      ) : error ? (
+        <ErrorState message={error} onRetry={load} />
       ) : filtered.length === 0 ? (
-        <div className="rounded-xl border border-slate-200 bg-white p-12 shadow-card text-center">
-          <Inbox className="mx-auto h-10 w-10 text-slate-300" />
-          <p className="mt-3 text-sm font-semibold text-slate-600">No events found</p>
-          <p className="mt-1 text-xs text-slate-400">
-            {(user?.role === 'ADMIN' || user?.role === 'MANAGER')
+        <div className="rounded-xl border border-slate-200 bg-white p-12 shadow-card">
+          <EmptyState
+            icon={Inbox}
+            title="No events found"
+            hint={(user?.role === 'ADMIN' || user?.role === 'MANAGER')
               ? 'Schedule an event from a plan via the Calendar page.'
               : 'No events have been scheduled yet.'}
-          </p>
+          />
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -76,9 +76,7 @@ export default function ExecutionHub() {
                   <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 ring-1 ring-inset ring-indigo-100 transition group-hover:bg-indigo-600 group-hover:text-white">
                     <CalendarDays className="h-6 w-6" />
                   </span>
-                  <span className={`rounded-full border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${STATUS_STYLES[e.status] || STATUS_STYLES.PLANNED}`}>
-                    {e.status}
-                  </span>
+                  <Chip kind={e.status}>{e.status}</Chip>
                 </div>
 
                 <div>
@@ -94,7 +92,14 @@ export default function ExecutionHub() {
                     <span className="text-slate-600">Progress</span>
                     <span className="font-mono text-slate-900">{prog}%</span>
                   </div>
-                  <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    className="h-2 w-full overflow-hidden rounded-full bg-slate-100"
+                    role="progressbar"
+                    aria-valuenow={prog}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-label={`${e.title} progress ${prog}%`}
+                  >
                     <div
                       className={`h-full transition-all duration-300 ${e.status === 'DONE' ? 'bg-emerald-500' : 'bg-indigo-600'}`}
                       style={{ width: `${prog}%` }}

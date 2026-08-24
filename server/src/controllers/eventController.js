@@ -17,6 +17,29 @@ const scheduleEventSchema = z.object({
   venue: z.string().max(200).optional()
 });
 
+const updateEventSchema = z.object({
+  title: z.string().min(3).max(120).optional(),
+  startDate: z.string().refine(val => !isNaN(Date.parse(val)), 'Invalid start date').optional(),
+  endDate: z
+    .string()
+    .refine(val => !isNaN(Date.parse(val)), 'Invalid end date')
+    .nullable()
+    .optional(),
+  venue: z.string().max(200).optional(),
+  status: z.enum(['PLANNED', 'ONGOING', 'DONE']).optional()
+});
+
+const addExecutionItemSchema = z.object({
+  title: z.string().min(1).max(120),
+  parentId: z.string().optional(),
+  priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']).optional(),
+  dueDate: z
+    .string()
+    .refine(val => !isNaN(Date.parse(val)), 'Invalid due date')
+    .nullable()
+    .optional()
+});
+
 const getEvents = asyncHandler(async (req, res) => {
   const { from, to } = req.query;
   const filter = {};
@@ -83,17 +106,23 @@ const getEventById = asyncHandler(async (req, res) => {
 });
 
 const updateEvent = asyncHandler(async (req, res) => {
+  const parsed = updateEventSchema.parse(req.body);
   const event = await Event.findById(req.params.id);
   if (!event) {
     throw new ApiError(404, 'NOT_FOUND', 'Event not found');
   }
 
-  const { title, startDate, endDate, venue, status } = req.body;
-  if (title) event.title = title;
-  if (startDate) event.startDate = new Date(startDate);
-  if (endDate !== undefined) event.endDate = endDate ? new Date(endDate) : null;
-  if (venue !== undefined) event.venue = venue;
-  if (status) event.status = status;
+  if (parsed.startDate && parsed.endDate) {
+    if (new Date(parsed.endDate) < new Date(parsed.startDate)) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'End date must be on or after start date');
+    }
+  }
+
+  if (parsed.title !== undefined) event.title = parsed.title;
+  if (parsed.startDate !== undefined) event.startDate = new Date(parsed.startDate);
+  if (parsed.endDate !== undefined) event.endDate = parsed.endDate ? new Date(parsed.endDate) : null;
+  if (parsed.venue !== undefined) event.venue = parsed.venue;
+  if (parsed.status !== undefined) event.status = parsed.status;
 
   await event.save();
 
@@ -110,8 +139,10 @@ const deleteEvent = asyncHandler(async (req, res) => {
     throw new ApiError(404, 'NOT_FOUND', 'Event not found');
   }
 
-  await Event.findByIdAndDelete(req.params.id);
-  await EventItem.deleteMany({ eventId: req.params.id });
+  await withTx(async (session) => {
+    await Event.findByIdAndDelete(req.params.id, session ? { session } : {});
+    await EventItem.deleteMany({ eventId: req.params.id }, session ? { session } : {});
+  });
 
   return res.status(200).json({
     success: true,
@@ -128,8 +159,9 @@ const getEventProgress = asyncHandler(async (req, res) => {
 });
 
 const addExecutionItem = asyncHandler(async (req, res) => {
+  const parsed = addExecutionItemSchema.parse(req.body);
   const { eventId } = req.params;
-  const { title, parentId, priority, dueDate } = req.body;
+  const { title, parentId, priority, dueDate } = parsed;
 
   const event = await Event.findById(eventId);
   if (!event) {

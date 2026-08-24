@@ -4,17 +4,28 @@
 > (PART I–III). Short pointer: `AGENTS.md`.
 
 ## Snapshot
-- **Phase:** TESTING-ready — CODING complete. Owner said "FIX ALL" (2026-08-24):
-  T-013 shared components, T-018 unified TreeView, T-024 transactions,
-  T-032–T-035 polish, HTTP tests, **13/13 DoD rehearsal PASS** all done.
-  Remaining: formal TESTING gate trigger ("run tests" already satisfied by
-  evidence), deployment T-038/T-039 on owner request.
+- **Phase:** PHASE 1 COMPLETE + **improvement cycle delivered** (2026-08-24).
+  All 4 approved batches implemented & verified: backend hardening (validation,
+  transactions, service extraction), frontend correctness (error states,
+  double-submit locks, modal a11y, silent refreshes), UI polish (shared chips/
+  menus, relative dates, calendar day popover, URL-addressable plan builder),
+  and full submission docs (README/SETUP/API-DOCS/DATA-MODEL/DEMO-SCRIPT/
+  VIVA-NOTES). Deployment stays OUT OF SCOPE for Phase 1.
 - **Stack decision:** MERN in **JavaScript** (owner confirmed 2026-08-23).
-- **Branch:** `v1`. All code since `65f4c9d` is LOCAL + UNCOMMITTED (owner
-  triggers commits).
-- **Verification (2026-08-24):** server tests **29/29** (acceptance 18 +
-  http-layer 11, isolated DBs `organishift_test` / `_http`); DoD rehearsal
-  **13/13** (`organishift_dod`); client production build clean.
+- **Branch:** `v1`. Improvement work is LOCAL + UNCOMMITTED (owner triggers).
+- **Verification (2026-08-24, post-improvements):** server tests **40/40**
+  (acceptance 18 + http-layer 22); DoD rehearsal **13/13**; client build clean;
+  client `npm run lint` NOT runnable (eslint not installed — noted limitation).
+
+## Product (Phase 1)
+- Routes: `/login /dashboard /planning-library /event-plans /calendar
+  /execution /events/:id` (+ builder addressable via `/event-plans?plan=<id>`).
+- Shared frontend core: components/common/{Toast,TreeView,DropdownMenu,chips,
+  index} used by all pages; Layout has working + accessible mobile drawer;
+  breadcrumb shows event titles.
+- Backend transactions: `utils/withTx` wraps cascade delete, plan→event clone,
+  library→plan copy, execution subtree delete (auto-fallback without session).
+- All write endpoints Zod-validated; Mongoose ValidationError → clean 400.
 
 ## Product (Phase 1)
 - Routes: `/login /dashboard /planning-library /event-plans /calendar
@@ -58,14 +69,13 @@ Scratch/  archive/ frozen specs · logo/ · OrganiShift/coding/index.html
 - Tests use separate `organishift_test` DB (never touch seed data).
 
 ## Gates (RULEBOOK §F)
-DISCOVERY ✅ · PLANNING ✅ · DESIGN ✅ · UI ✅ (iterative tweaks ongoing) ·
-CODING ✅ open · TESTING ◐ partial (18 core tests green; HTTP-layer tests +
-13-step DoD run pending → trigger **"run tests"**) · RELEASE ⬜ (**"approve
-release"**).
+DISCOVERY ✅ · PLANNING ✅ · DESIGN ✅ · UI ✅ · CODING ✅ ·
+TESTING ✅ (owner acknowledged; now 40/40 tests + 13/13 DoD + clean build) ·
+RELEASE ⬜ DE-SCOPED from Phase 1 by owner (college project, local-only).
+Improvement cycle: planned + approved + implemented same day, verified.
 
-## Known debts (tracked in TODO.md notes)
-- T-013/T-018: shared common components + single TreeView extraction pending
-  (patterns exist per-page).
-- Cascade delete + clone not yet wrapped in explicit Mongo sessions/transactions.
-- ProtectedRoute preserves attempted path ✅ but deep-link role redirects are
-  simple (to /dashboard).
+## Known debts / notes
+- Client eslint not installed → `npm run lint` fails locally (build is the
+  working check). Installing it = owner-approved dependency change.
+- Deployment (T-038/T-039) intentionally out of scope. Deep-link role redirects
+  remain simple (to /dashboard) — accepted.
