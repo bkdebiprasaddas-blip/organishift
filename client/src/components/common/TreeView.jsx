@@ -20,38 +20,42 @@ export default function TreeView({
   keyOf = n => n._id ?? n.id,
   isCollapsed = () => false,
   onToggle = () => {},
-  rowClassName = () => 'bg-slate-50 hover:bg-indigo-50/40',
+  rowClassName = () => 'bg-white hover:bg-slate-50',
   renderMain,
   renderActions,
+  renderSubRow,
   renderCollapsed,
-  childrenWrap = 'ml-[11px] space-y-1 border-l border-slate-200 pl-5'
+  childrenWrap = 'ml-5 pl-4 border-l-2 border-indigo-100/80 space-y-1.5 pt-1.5'
 }) {
   if (!nodes || nodes.length === 0) return null;
 
   return (
-    <div className="space-y-1">
-      {nodes.map(node => {
+    <div className="space-y-1.5">
+      {nodes.map((node, index) => {
         const id = keyOf(node);
         const kids = node.children || [];
         const hasKids = kids.length > 0;
         const col = isCollapsed(node);
+        const isLast = index === nodes.length - 1;
 
         return (
-          <div key={id} className="space-y-1">
-            <div className={`group relative flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-lg border border-slate-200 px-3 py-2 ${rowClassName(node, hasKids)}`}>
-              <div className="flex min-w-0 items-center gap-2">
+          <div key={id} className="relative space-y-1">
+            <div className={`group/row relative flex flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-xl border border-slate-200/90 px-3.5 py-2.5 shadow-xs transition-all duration-150 ${rowClassName(node, hasKids)}`}>
+              <div className="flex min-w-0 items-center gap-2 flex-1">
                 {hasKids ? (
                   <button
                     type="button"
                     onClick={() => onToggle(id)}
                     aria-expanded={!col}
                     aria-label={col ? 'Expand' : 'Collapse'}
-                    className="shrink-0 rounded p-0.5 text-slate-500 transition hover:bg-white hover:text-indigo-600"
+                    className="shrink-0 rounded-md p-1 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition"
                   >
-                    {col ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                    {col ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
                   </button>
                 ) : (
-                  <span className="w-[22px] shrink-0" />
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+                    <span className="h-1.5 w-1.5 rounded-full bg-slate-300 group-hover:bg-indigo-400 transition" />
+                  </span>
                 )}
                 {renderMain(node, { hasKids })}
               </div>
@@ -61,6 +65,8 @@ export default function TreeView({
                 </div>
               )}
             </div>
+
+            {renderSubRow && renderSubRow(node, { hasKids })}
 
             {hasKids && !col && (
               <div className={childrenWrap}>
@@ -72,6 +78,7 @@ export default function TreeView({
                   rowClassName={rowClassName}
                   renderMain={renderMain}
                   renderActions={renderActions}
+                  renderSubRow={renderSubRow}
                   renderCollapsed={renderCollapsed}
                   childrenWrap={childrenWrap}
                 />

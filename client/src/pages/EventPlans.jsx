@@ -212,7 +212,7 @@ export default function EventPlans() {
                     const isCol = !!collapsed[node._id];
                     const isLib = node.source === 'LIBRARY';
                     return (
-                      <>
+                      <div className="flex flex-wrap items-center gap-2 min-w-0 flex-1">
                         {hasKids
                           ? (isCol ? <Folder className={`h-4 w-4 shrink-0 ${isLib ? 'text-indigo-600' : 'text-emerald-600'}`} /> : <FolderOpen className={`h-4 w-4 shrink-0 ${isLib ? 'text-indigo-600' : 'text-emerald-600'}`} />)
                           : <FileText className={`h-4 w-4 shrink-0 ${isLib ? 'text-indigo-600' : 'text-emerald-600'}`} />}
@@ -220,27 +220,34 @@ export default function EventPlans() {
                         <span className={`shrink-0 rounded border px-1.5 py-0.5 text-[9px] font-bold uppercase ${isLib ? 'border-indigo-200 bg-indigo-50 text-indigo-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
                           {isLib ? 'Library' : 'Custom'}
                         </span>
-                      </>
+
+                        {/* Hover Action Toolbar - Placed directly inline after the title text */}
+                        {isAdmin && (
+                          <div className="ml-2 inline-flex items-center gap-1 opacity-0 transition-opacity duration-150 group-hover/row:opacity-100 focus-within:opacity-100">
+                            <button
+                              type="button"
+                              title="Add Child Sub-module"
+                              onClick={(e) => { e.stopPropagation(); setModal({ type: 'add', node, title: '' }); }}
+                              className="flex items-center gap-1 rounded bg-indigo-600 px-1.5 py-0.5 text-[10px] font-semibold text-white hover:bg-indigo-500 transition cursor-pointer"
+                            >
+                              <FolderPlus className="h-3 w-3" />
+                              <span>+ Child</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              title="Delete from plan"
+                              onClick={(e) => { e.stopPropagation(); setConfirm({ type: 'delete-item', item: node, total: 1 + countAll(node) }); }}
+                              className="rounded border border-rose-200 bg-rose-50 p-0.5 text-rose-600 hover:bg-rose-100 transition cursor-pointer"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     );
                   }}
-                  renderActions={isAdmin ? (node) => (
-                    <DropdownMenu
-                      label={`Actions for ${node.title}`}
-                      buttonClassName="min-h-[32px] min-w-[32px] rounded p-1.5 text-slate-400 opacity-0 transition hover:bg-slate-200 hover:text-slate-700 focus:opacity-100 group-hover:opacity-100"
-                    >
-                      {close => (
-                        <>
-                          <button role="menuitem" onClick={() => { close(); setModal({ type: 'add', node, title: '' }); }} className="flex w-full items-center gap-2.5 px-3 py-2.5 text-xs font-semibold text-slate-700 hover:bg-indigo-50 hover:text-indigo-700">
-                            <FolderPlus className="h-3.5 w-3.5" />Add Child
-                          </button>
-                          <div className="mx-2 my-1 border-t border-slate-100" />
-                          <button role="menuitem" onClick={() => { close(); setConfirm({ type: 'delete-item', item: node, total: 1 + countAll(node) }); }} className="flex w-full items-center gap-2.5 px-3 py-2.5 text-xs font-semibold text-rose-600 hover:bg-rose-50">
-                            <Trash2 className="h-3.5 w-3.5" />Delete
-                          </button>
-                        </>
-                      )}
-                    </DropdownMenu>
-                  ) : undefined}
+                  renderActions={() => null}
                   renderCollapsed={node => (
                     <div className="ml-[11px] pl-5">
                       <button onClick={() => setCollapsed(c => ({ ...c, [node._id]: false }))}

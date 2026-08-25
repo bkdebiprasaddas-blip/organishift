@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import {
-  Folder, FolderOpen, FileText, FolderPlus, MapPin
+  Folder, FolderOpen, FileText, FolderPlus, MapPin, CheckSquare, Square, Pencil, Trash2
 } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -131,16 +131,48 @@ export default function EventExecution() {
             rowClassName={(n, hasKids) => hasKids ? 'bg-slate-50 hover:bg-indigo-50/40' : 'bg-white hover:bg-slate-50'}
             renderMain={(node, { hasKids }) => {
               const isCol = !!collapsed[node._id];
+              const isCompleted = node.status === 'COMPLETED';
+              const options = statusOptionsFor(node);
+              const canToggleStatus = !hasKids && (
+                role === 'MEMBER'
+                  ? String(node.assigneeId?._id ?? node.assigneeId) === String(user._id) && node.status !== 'COMPLETED'
+                  : true
+              );
+
               return (
-                <>
-                  {hasKids
-                    ? (isCol ? <Folder className="h-4 w-4 shrink-0 text-slate-500" /> : <FolderOpen className="h-4 w-4 shrink-0 text-slate-500" />)
-                    : <FileText className="h-4 w-4 shrink-0 text-slate-400" />}
-                  <span className={`truncate text-xs ${hasKids ? 'font-bold text-slate-900' : 'font-semibold text-slate-800'}`}>{node.title}</span>
+                <div className="flex flex-wrap items-center gap-2 min-w-0 flex-1">
+                  {hasKids ? (
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-indigo-100 text-indigo-700">
+                      {isCol ? <Folder className="h-3.5 w-3.5" /> : <FolderOpen className="h-3.5 w-3.5" />}
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled={!canToggleStatus}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (canToggleStatus) {
+                          const nextStatus = isCompleted ? 'IN_PROGRESS' : 'COMPLETED';
+                          updateItem(node, { status: nextStatus });
+                        }
+                      }}
+                      title={isCompleted ? "Mark in progress" : "Mark completed"}
+                      className={`flex h-5 w-5 shrink-0 items-center justify-center rounded transition ${canToggleStatus ? 'cursor-pointer hover:bg-emerald-50' : 'cursor-not-allowed opacity-60'}`}
+                    >
+                      {isCompleted ? <CheckSquare className="h-4 w-4 text-emerald-600" /> : <Square className="h-4 w-4 text-slate-300 hover:text-emerald-500" />}
+                    </button>
+                  )}
+
+                  <span className={`text-xs transition-all ${hasKids ? 'font-bold text-slate-900' : (isCompleted ? 'line-through text-slate-400 font-medium' : 'font-semibold text-slate-800')}`}>
+                    {node.title}
+                  </span>
+
                   <Chip kind={node.status}>{label(node.status)}</Chip>
+
                   {node.priority && (
                     <span className={`shrink-0 text-[10px] uppercase ${PRIORITY_TEXT[node.priority]}`}>{node.priority}</span>
                   )}
+
                   {node.dueDate && (() => {
                     const overdue = new Date(node.dueDate) < new Date() && node.status !== 'COMPLETED';
                     return (
@@ -151,7 +183,7 @@ export default function EventExecution() {
                       </span>
                     );
                   })()}
-                </>
+                </div>
               );
             }}
             renderActions={(node, { hasKids }) => {
@@ -218,7 +250,7 @@ export default function EventExecution() {
                       onClick={() => setAddModal({ parent: node })}
                       title="Add child item"
                       aria-label={`Add child under ${node.title}`}
-                      className="min-h-[32px] min-w-[32px] rounded p-1.5 text-slate-400 opacity-0 transition hover:bg-indigo-100 hover:text-indigo-700 focus:opacity-100 group-hover:opacity-100"
+                      className="min-h-[32px] min-w-[32px] rounded p-1.5 text-slate-400 opacity-0 transition hover:bg-indigo-100 hover:text-indigo-700 focus:opacity-100 group-hover/row:opacity-100"
                     >
                       <FolderPlus className="h-3.5 w-3.5" />
                     </button>

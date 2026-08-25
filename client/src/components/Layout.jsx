@@ -53,7 +53,7 @@ export default function Layout() {
     ];
 
     if (role === 'ADMIN' || role === 'MANAGER') {
-      links.push({ to: '/planning-library', icon: <FolderTree size={18} />, label: 'Planning Library', roles: ['ADMIN', 'MANAGER'] });
+      links.push({ to: '/planning-library', icon: <FolderTree size={18} />, label: 'Reusable Event', roles: ['ADMIN', 'MANAGER'] });
     }
 
     if (role === 'ADMIN') {
@@ -83,7 +83,7 @@ export default function Layout() {
     }
     const titles = {
       '/dashboard': 'Dashboard',
-      '/planning-library': 'Planning Library',
+      '/planning-library': 'Reusable Event',
       '/event-plans': 'Event Plans',
       '/calendar': 'Calendar',
       '/execution': 'Execution'

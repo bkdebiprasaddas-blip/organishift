@@ -1,6 +1,13 @@
+export function formatDateSafe(input) {
+  if (!input) return 'N/A';
+  const d = new Date(input);
+  return isNaN(d.getTime()) ? 'N/A' : d.toLocaleDateString();
+}
+
 export function relativeDate(input) {
   if (!input) return '';
   const d = new Date(input);
+  if (isNaN(d.getTime())) return '';
   const today = new Date();
   const startOfDay = x => new Date(x.getFullYear(), x.getMonth(), x.getDate());
   const diffDays = Math.round((startOfDay(d) - startOfDay(today)) / 86400000);
@@ -11,3 +18,4 @@ export function relativeDate(input) {
   if (diffDays <= 7) return `in ${diffDays} days`;
   return `due ${d.toLocaleDateString()}`;
 }
+

@@ -4,6 +4,7 @@ import { CalendarDays, Inbox } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { Chip, EmptyState, ErrorState, SkeletonCard } from '../components/common';
+import { formatDateSafe } from '../utils/dates';
 
 export default function ExecutionHub() {
   const [events, setEvents] = useState([]);
@@ -82,7 +83,7 @@ export default function ExecutionHub() {
                 <div>
                   <h3 className="text-base font-bold text-slate-900 transition group-hover:text-indigo-600">{e.title}</h3>
                   <p className="mt-0.5 text-xs text-slate-500">
-                    {new Date(e.startDate).toLocaleDateString()}
+                    {formatDateSafe(e.startDate)}
                     {e.venue ? ` · ${e.venue}` : ''}
                   </p>
                 </div>
