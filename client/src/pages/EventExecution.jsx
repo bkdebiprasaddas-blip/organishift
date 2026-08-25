@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import {
   Folder, FolderOpen, FileText, FolderPlus, MapPin, CheckSquare, Square, Pencil, Trash2
 } from 'lucide-react';
@@ -7,7 +7,7 @@ import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/common/Toast';
 import TreeView from '../components/common/TreeView';
-import { Modal, Spinner, ErrorState, Chip, STATUS_CHIP, PRIORITY_TEXT } from '../components/common';
+import { Modal, ConfirmDialog, Spinner, ErrorState, Chip, STATUS_CHIP, PRIORITY_TEXT } from '../components/common';
 import TaskDetailDrawer from '../components/common/TaskDetailDrawer';
 import { relativeDate } from '../utils/dates';
 
@@ -24,12 +24,14 @@ export default function EventExecution() {
   const { id } = useParams();
   const { user } = useAuth();
   const role = user?.role;
+  const navigate = useNavigate();
 
   const [data, setData] = useState(null);
   const [users, setUsers] = useState([]);
   const [collapsed, setCollapsed] = useState({});
   const [addModal, setAddModal] = useState(null); // {parent}
   const [activeDrawerItem, setActiveDrawerItem] = useState(null);
+  const [confirmDeleteEvent, setConfirmDeleteEvent] = useState(false);
   const [title, setTitle] = useState('');
   const [error, setError] = useState('');
 
@@ -78,6 +80,16 @@ export default function EventExecution() {
       item.status === 'COMPLETED' ? isAdminOrManager : true
     );
 
+  const handleDeleteEvent = async () => {
+    try {
+      await api.delete(`/events/${id}`);
+      toast(`Event "${event.title}" deleted`);
+      navigate('/execution');
+    } catch (err) {
+      toast(err.message || 'Failed to delete event', 'error');
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-5 shadow-card">
@@ -89,7 +101,21 @@ export default function EventExecution() {
               {event.venue && <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{event.venue}</span>}
             </p>
           </div>
-          <Chip kind={event.status}>{event.status}</Chip>
+
+          <div className="flex items-center gap-2">
+            <Chip kind={event.status}>{event.status}</Chip>
+            {role === 'ADMIN' && (
+              <button
+                type="button"
+                onClick={() => setConfirmDeleteEvent(true)}
+                title="Delete this scheduled event"
+                className="flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-600 hover:bg-rose-100 transition cursor-pointer"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                <span>Delete Event</span>
+              </button>
+            )}
+          </div>
         </div>
         <div>
           <div className="mb-1 flex justify-between text-xs font-semibold">
@@ -292,6 +318,18 @@ export default function EventExecution() {
               className="min-h-[36px] rounded-lg bg-indigo-600 px-3.5 text-xs font-semibold text-white disabled:opacity-50">Add</button>
           </div>
         </Modal>
+      )}
+
+      {/* Confirm Delete Event Dialog */}
+      {confirmDeleteEvent && (
+        <ConfirmDialog
+          title={`Delete Event "${event.title}"?`}
+          message="Are you sure you want to delete this scheduled event? All execution items and progress data for this event will be permanently removed."
+          confirmLabel="Delete Event"
+          danger
+          onConfirm={handleDeleteEvent}
+          onCancel={() => setConfirmDeleteEvent(false)}
+        />
       )}
 
       {/* Task Detail Slide-Over Side Drawer */}
