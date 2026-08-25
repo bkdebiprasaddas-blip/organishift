@@ -6,7 +6,14 @@ const asyncHandler = require('../utils/asyncHandler');
 
 const createItemSchema = z.object({
   title: z.string().min(1).max(120),
-  description: z.string().max(500).optional(),
+  description: z.string().max(1000).optional(),
+  operationalNotes: z.string().max(2000).optional(),
+  nodeType: z.enum(['FOLDER', 'TASK', 'MILESTONE']).optional(),
+  tags: z.array(z.string()).optional(),
+  checklist: z.array(z.object({
+    text: z.string(),
+    completed: z.boolean().optional()
+  })).optional(),
   parentId: z.string().nullable().optional(),
   planId: z.string().nullable().optional(),
   scope: z.enum(['LIBRARY', 'PLAN']),
@@ -15,7 +22,14 @@ const createItemSchema = z.object({
 
 const updateItemSchema = z.object({
   title: z.string().min(1).max(120).optional(),
-  description: z.string().max(500).optional(),
+  description: z.string().max(1000).optional(),
+  operationalNotes: z.string().max(2000).optional(),
+  nodeType: z.enum(['FOLDER', 'TASK', 'MILESTONE']).optional(),
+  tags: z.array(z.string()).optional(),
+  checklist: z.array(z.object({
+    text: z.string(),
+    completed: z.boolean().optional()
+  })).optional(),
   order: z.number().optional()
 });
 

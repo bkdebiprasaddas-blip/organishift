@@ -16,7 +16,7 @@ class PlanningService {
   }
 
   async createItem(data, userId) {
-    const { title, description, parentId, planId, scope, order } = data;
+    const { title, description, operationalNotes, nodeType, tags, checklist, parentId, planId, scope, order } = data;
 
     let level = 0;
     let parentPath = ',';
@@ -36,6 +36,10 @@ class PlanningService {
     const item = new PlanningItem({
       title,
       description,
+      operationalNotes,
+      nodeType: nodeType || 'TASK',
+      tags: tags || [],
+      checklist: checklist || [],
       parentId: parentId || null,
       planId: planId || null,
       scope,

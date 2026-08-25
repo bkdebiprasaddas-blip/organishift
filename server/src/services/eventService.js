@@ -43,6 +43,11 @@ class EventService {
           eventId: event._id,
           parentId: parentEventItemId || null,
           title: pItem.title,
+          nodeType: pItem.nodeType || 'TASK',
+          description: pItem.description || '',
+          operationalNotes: pItem.operationalNotes || '',
+          tags: pItem.tags || [],
+          checklist: (pItem.checklist || []).map(c => ({ text: c.text, completed: c.completed })),
           path: ',',
           level: pItem.level,
           order: pItem.order,
@@ -81,7 +86,7 @@ class EventService {
       throw new ApiError(404, 'NOT_FOUND', 'Execution item not found');
     }
 
-    const { status, assigneeId, priority, dueDate } = updateData;
+    const { title, nodeType, description, operationalNotes, tags, checklist, comments, attachments, status, assigneeId, priority, dueDate } = updateData;
 
     // Field-Gating Check (§4 Spec)
     // assigneeId, priority, dueDate -> Manager only
@@ -91,6 +96,14 @@ class EventService {
       }
     }
 
+    if (title !== undefined) item.title = title;
+    if (nodeType !== undefined) item.nodeType = nodeType;
+    if (description !== undefined) item.description = description;
+    if (operationalNotes !== undefined) item.operationalNotes = operationalNotes;
+    if (tags !== undefined) item.tags = tags;
+    if (checklist !== undefined) item.checklist = checklist;
+    if (comments !== undefined) item.comments = comments;
+    if (attachments !== undefined) item.attachments = attachments;
     if (assigneeId !== undefined) item.assigneeId = assigneeId || null;
     if (priority !== undefined) item.priority = priority;
     if (dueDate !== undefined) item.dueDate = dueDate ? new Date(dueDate) : null;

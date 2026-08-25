@@ -8,6 +8,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/common/Toast';
 import TreeView from '../components/common/TreeView';
 import { Modal, Spinner, ErrorState, Chip, STATUS_CHIP, PRIORITY_TEXT } from '../components/common';
+import TaskDetailDrawer from '../components/common/TaskDetailDrawer';
 import { relativeDate } from '../utils/dates';
 
 const TRANSITIONS = {
@@ -28,6 +29,7 @@ export default function EventExecution() {
   const [users, setUsers] = useState([]);
   const [collapsed, setCollapsed] = useState({});
   const [addModal, setAddModal] = useState(null); // {parent}
+  const [activeDrawerItem, setActiveDrawerItem] = useState(null);
   const [title, setTitle] = useState('');
   const [error, setError] = useState('');
 
@@ -163,7 +165,11 @@ export default function EventExecution() {
                     </button>
                   )}
 
-                  <span className={`text-xs transition-all ${hasKids ? 'font-bold text-slate-900' : (isCompleted ? 'line-through text-slate-400 font-medium' : 'font-semibold text-slate-800')}`}>
+                  <span
+                    onClick={(e) => { e.stopPropagation(); setActiveDrawerItem(node); }}
+                    title="Click to open task detail drawer"
+                    className={`text-xs transition-all cursor-pointer hover:text-indigo-600 hover:underline ${hasKids ? 'font-bold text-slate-900' : (isCompleted ? 'line-through text-slate-400 font-medium' : 'font-semibold text-slate-800')}`}
+                  >
                     {node.title}
                   </span>
 
@@ -280,12 +286,29 @@ export default function EventExecution() {
             onKeyDown={e => e.key === 'Enter' && addChild()}
             placeholder="Item title" aria-label="Child item title"
             className="w-full rounded-lg border border-slate-300 p-2.5 text-xs font-semibold" />
-          <div className="mt-5 flex justify-end gap-2">
-            <button onClick={() => setAddModal(null)} className="min-h-[36px] px-3 py-1.5 text-xs font-semibold text-slate-600">Cancel</button>
-            <button onClick={addChild} disabled={!title.trim()} className="min-h-[36px] rounded-lg bg-indigo-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm disabled:opacity-50">Add</button>
+          <div className="mt-4 flex justify-end gap-2">
+            <button onClick={() => setAddModal(null)} className="min-h-[36px] px-3 text-xs font-semibold text-slate-600">Cancel</button>
+            <button onClick={addChild} disabled={!title.trim()}
+              className="min-h-[36px] rounded-lg bg-indigo-600 px-3.5 text-xs font-semibold text-white disabled:opacity-50">Add</button>
           </div>
         </Modal>
       )}
+
+      {/* Task Detail Slide-Over Side Drawer */}
+      <TaskDetailDrawer
+        isOpen={!!activeDrawerItem}
+        onClose={() => setActiveDrawerItem(null)}
+        item={activeDrawerItem}
+        onUpdate={async (item, patch) => {
+          await updateItem(item, patch);
+          setActiveDrawerItem(prev => prev ? { ...prev, ...patch } : null);
+        }}
+        users={users}
+        currentUser={user}
+        isManager={isManager}
+        isAdminOrManager={isAdminOrManager}
+        role={role}
+      />
     </div>
   );
 }
