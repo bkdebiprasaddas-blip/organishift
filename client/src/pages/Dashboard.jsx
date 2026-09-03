@@ -29,7 +29,7 @@ export default function Dashboard() {
   const showToast = useToast();
 
   const updateStatus = async (item, status) => {
-    if (!status || updatingId) return;
+    if (!status || updatingId === item._id) return;
     setUpdatingId(item._id); // IMP-B3: one in-flight change per row
     try {
       await api.put(`/events/items/${item._id}`, { status });

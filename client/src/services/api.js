@@ -19,14 +19,20 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Response interceptor: unwrap envelope and handle errors
+// Response interceptor: unwrap envelope, handle errors, redirect on 401
 api.interceptors.response.use(
   (response) => {
     return response.data.data;
   },
   (error) => {
-    if (error.response && error.response.data) {
-      return Promise.reject(error.response.data.error || { message: 'An unknown error occurred' });
+    if (error.response?.data?.error) {
+      const err = error.response.data.error;
+      // CL-M2: global 401 handling — clear token + redirect to login
+      if (error.response.status === 401) {
+        localStorage.removeItem('token');
+        window.location.href = '/login';
+      }
+      return Promise.reject(err);
     }
     return Promise.reject({ message: 'Network Error: Could not connect to server' });
   }

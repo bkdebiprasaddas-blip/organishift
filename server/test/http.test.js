@@ -7,6 +7,7 @@ const app = require('../src/server');
 const env = require('../src/config/env');
 const User = require('../src/models/User');
 const PlanningItem = require('../src/models/PlanningItem');
+const EventItem = require('../src/models/EventItem');
 
 let server, base;
 let adminToken = '', managerToken = '', memberToken = '';
@@ -236,13 +237,13 @@ test('H-15: addExecutionItem invalid priority -> 400; valid -> 201 + progress re
 
   const ok = await req('POST', `/api/events/${eventId}/items`, {
     token: managerToken,
-    body: { title: 'Leaf A', priority: 'HIGH', dueDate: '2030-07-10' }
+    body: { title: 'Leaf A', priority: 'HIGH', dueDate: '2030-07-10', assigneeId: undefined }
   });
   assert.strictEqual(ok.status, 201);
   assert.strictEqual(ok.json.data.priority, 'HIGH');
   assert.strictEqual(ok.json.data.status, 'NOT_STARTED');
 
-  const progress = (await req('GET', `/api/events/${eventId}/progress`, { token: memberToken })).json.data;
+  const progress = (await req('GET', `/api/events/${eventId}/progress`, { token: adminToken })).json.data;
   assert.strictEqual(typeof progress.eventProgress, 'number');
   assert.ok(progress.tree.length >= 1);
 });
@@ -368,6 +369,32 @@ test('H-20: deletePlan cascades — plan gone, its PLAN-scope items removed', as
   assert.strictEqual(leftovers, 0);
 });
 
+// ---------- SV-M13: plan deletion blocked when events reference it ----------
+test('SV-M13: deletePlan with scheduled events -> 409 CONFLICT', async () => {
+  const Event = require('../src/models/Event');
+  const libRoot = await makeLibraryBranch('BlockPlan');
+  const plan = (await req('POST', '/api/event-plans', {
+    token: adminToken, body: { title: 'Protected Plan' }
+  })).json.data;
+  await req('POST', `/api/event-plans/${plan._id}/items/from-library`, {
+    token: adminToken, body: { libraryItemId: libRoot }
+  });
+  // Schedule a real event from this plan
+  await req('POST', '/api/events', {
+    token: adminToken,
+    body: { title: 'Event from Protected Plan', planId: plan._id, startDate: '2026-09-20' }
+  });
+
+  const del = await req('DELETE', `/api/event-plans/${plan._id}`, { token: adminToken });
+  assert.strictEqual(del.status, 409);
+  assert.strictEqual(del.json.error.code, 'CONFLICT');
+  assert.ok(del.json.error.message.includes('scheduled event'));
+
+  // Plan still exists
+  const after = await req('GET', `/api/event-plans/${plan._id}`, { token: adminToken });
+  assert.strictEqual(after.status, 200);
+});
+
 test('H-21: users lifecycle — create 201, duplicate 409, update role, deactivate blocks login', async () => {
   const created = await req('POST', '/api/users', {
     token: adminToken,
@@ -404,4 +431,30 @@ test('H-22: dashboard stats endpoint returns success envelope with counter field
   assert.strictEqual(json.success, true);
   assert.ok(typeof json.data === 'object');
   assert.ok(!JSON.stringify(json.data).includes('passwordHash'));
+});
+
+// ---------- SV-L6: move body validation ----------
+test('SV-L6: move with missing newParentId -> 400', async () => {
+  const libRoot = await makeLibraryBranch('MoveTest');
+  const res = await req('PUT', `/api/planning-items/${libRoot}/move`, {
+    token: adminToken,
+    body: {}
+  });
+  assert.strictEqual(res.status, 400);
+});
+
+// ---------- SV-L14: assigneeId must reference existing active user ----------
+test('SV-L14: assign execution item to nonexistent user -> 400', async () => {
+  const Event = require('../src/models/Event');
+  const jwt2 = require('jsonwebtoken');
+  const adminUid = jwt2.verify(adminToken, env.JWT_SECRET).id;
+  const event = await Event.create({ title: 'Test', planId: new mongoose.Types.ObjectId(), startDate: new Date('2026-09-01'), createdBy: adminUid });
+  const leaf = await EventItem.create({ eventId: event._id, title: 'Leaf', path: ',', level: 0, order: 0, status: 'NOT_STARTED' });
+
+  const res = await req('PUT', `/api/events/items/${leaf._id}`, {
+    token: managerToken,
+    body: { assigneeId: new mongoose.Types.ObjectId().toString() }
+  });
+  assert.strictEqual(res.status, 400);
+  assert.strictEqual(res.json.error.code, 'VALIDATION_ERROR');
 });

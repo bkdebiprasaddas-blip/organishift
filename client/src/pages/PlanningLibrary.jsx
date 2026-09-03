@@ -25,9 +25,21 @@ export default function PlanningLibrary() {
   const [confirm, setConfirm] = useState(null); // {node, total}
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [checkedItems, setCheckedItems] = useState({});
+  // CL-L4: persist checkoff state to localStorage so it survives reloads
+  const [checkedItems, setCheckedItems] = useState(() => {
+    try {
+      const saved = localStorage.getItem('organishift_library_checked');
+      return saved ? JSON.parse(saved) : {};
+    } catch { return {}; }
+  });
 
-  const toggleChecklist = (id) => setCheckedItems(prev => ({ ...prev, [id]: !prev[id] }));
+  const toggleChecklist = (id) => {
+    setCheckedItems(prev => {
+      const next = { ...prev, [id]: !prev[id] };
+      try { localStorage.setItem('organishift_library_checked', JSON.stringify(next)); } catch { /* ignore */ }
+      return next;
+    });
+  };
 
   const toast = useToast();
 
@@ -66,7 +78,7 @@ export default function PlanningLibrary() {
     if (!title) return;
 
     try {
-      if (modal.type === 'edit') {
+       if (modal.type === 'edit' || modal.type === 'detail') {
         await api.put(`/planning-items/${modal.node._id}`, { title, description });
         toast('Item updated');
       } else {
@@ -104,11 +116,12 @@ export default function PlanningLibrary() {
     } catch (err) { setConfirm(null); toast(err.message || 'Delete failed', 'error'); }
   });
 
-  // Pre-built Quick Presets Generator
+   // Pre-built Quick Presets Generator
   const addPreset = (presetName, items) => runAction(async () => {
+    let rootId;
     try {
       const rootRes = await api.post('/planning-items', { title: presetName, scope: 'LIBRARY', parentId: null });
-      const rootId = rootRes._id;
+      rootId = rootRes._id;
       for (const item of items) {
         await api.post('/planning-items', {
           title: typeof item === 'string' ? item : item.title,
@@ -121,6 +134,10 @@ export default function PlanningLibrary() {
       load(true);
       toast(`Created preset template: "${presetName}"`);
     } catch (err) {
+      // CL-L3: clean up orphan root on failure
+      if (rootId) {
+        try { await api.delete(`/planning-items/${rootId}`); } catch { /* ignore cleanup error */ }
+      }
       toast(err.message || 'Failed to add preset', 'error');
     }
   });
@@ -198,10 +215,13 @@ export default function PlanningLibrary() {
       });
     };
     formatNode(tree);
-    navigator.clipboard.writeText(summaryText);
-    setCopied(true);
-    toast('Copied template summary to clipboard!');
-    setTimeout(() => setCopied(false), 2000);
+    if (!navigator.clipboard) {
+      toast('Clipboard not available', 'error');
+      return;
+    }
+    navigator.clipboard.writeText(summaryText)
+      .then(() => { setCopied(true); toast('Copied template summary to clipboard!'); setTimeout(() => setCopied(false), 2000); })
+      .catch(() => toast('Failed to copy to clipboard', 'error'));
   };
 
   if (loading) {
@@ -332,7 +352,10 @@ export default function PlanningLibrary() {
                 <div
                   onClick={() => setModal({ type: 'detail', node, title: node.title, description: node.description || '' })}
                   title="Click to open item popup details"
-                  className="flex flex-wrap items-center gap-2 min-w-0 flex-1 cursor-pointer"
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setModal({ type: 'detail', node, title: node.title, description: node.description || '' }); } }}
+                  role="button"
+                  tabIndex={0}
+                  className="flex flex-wrap items-center gap-2 min-w-0 flex-1 cursor-pointer focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1"
                 >
                   {hasKids ? (
                     <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-indigo-100 text-indigo-700">
@@ -349,11 +372,14 @@ export default function PlanningLibrary() {
                     </button>
                   )}
 
-                  <span
-                    className={`text-xs transition-all hover:text-indigo-600 ${hasKids ? 'font-bold text-slate-900' : (isChecked ? 'line-through text-slate-400 font-medium' : 'font-medium text-slate-800')}`}
-                  >
-                    {node.title}
-                  </span>
+                   <button
+                     type="button"
+                     onClick={(e) => { e.stopPropagation(); setModal({ type: 'detail', node, title: node.title, description: node.description || '' }); }}
+                     title="Click to open item popup details"
+                     className={`text-xs transition-all text-left hover:text-indigo-600 ${hasKids ? 'font-bold text-slate-900' : (isChecked ? 'line-through text-slate-400 font-medium' : 'font-medium text-slate-800')}`}
+                   >
+                     {node.title}
+                   </button>
 
                   {hasKids && isCol && (
                     <span className="shrink-0 rounded-full bg-slate-200 px-1.5 py-0.5 text-[9px] font-bold text-slate-600">
@@ -630,9 +656,10 @@ export default function PlanningLibrary() {
               </ul>
             </>
           }
-          confirmLabel={`Delete ${confirm.total} item${confirm.total === 1 ? '' : 's'}`}
-          onConfirm={remove}
-          onCancel={() => setConfirm(null)}
+           confirmLabel={`Delete ${confirm.total} item${confirm.total === 1 ? '' : 's'}`}
+           busy={busy}
+           onConfirm={remove}
+           onCancel={() => setConfirm(null)}
         />
       )}
     </div>

@@ -1,9 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   X, CheckSquare, Square, StickyNote, Tag, MessageSquare, Paperclip,
   Calendar, User, AlertCircle, Plus, Trash2, Send, Clock, Layers, ShieldCheck
 } from 'lucide-react';
 import { Chip, STATUS_CHIP, PRIORITY_TEXT } from './chips';
+import { useToast } from './Toast';
 
 export default function TaskDetailDrawer({
   isOpen,
@@ -31,7 +32,58 @@ export default function TaskDetailDrawer({
   const [newAttachmentName, setNewAttachmentName] = useState('');
   const [newAttachmentUrl, setNewAttachmentUrl] = useState('');
   const [showAddAttachment, setShowAddAttachment] = useState(false);
-  const [saving, setSaving] = useState(false);
+   const [saving, setSaving] = useState(false);
+const [saveError, setSaveError] = useState('');
+  const toast = useToast();
+  const panelRef = useRef(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  // CL-M5: Escape close + focus trap + scroll lock + dialog semantics
+  useEffect(() => {
+    if (!isOpen || !item) return undefined;
+
+    const panel = panelRef.current;
+    if (!panel) return undefined;
+
+    const previouslyFocused = document.activeElement;
+    const focusables = () => Array.from(
+      panel.querySelectorAll('input:not([disabled]), select:not([disabled]), textarea:not([disabled]), button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])')
+    );
+
+    const firstFocusable = focusables()[0];
+    if (firstFocusable) firstFocusable.focus();
+
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+
+    const onKeyDown = e => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onCloseRef.current();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+      const f = focusables();
+      if (!f.length) return;
+      if (e.shiftKey && document.activeElement === f[0]) {
+        e.preventDefault();
+        f[f.length - 1].focus();
+      } else if (!e.shiftKey && document.activeElement === f[f.length - 1]) {
+        e.preventDefault();
+        f[0].focus();
+      }
+    };
+
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = prevOverflow;
+      if (previouslyFocused && typeof previouslyFocused.focus === 'function') {
+        previouslyFocused.focus();
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (item) {
@@ -51,8 +103,11 @@ export default function TaskDetailDrawer({
   const handleSaveField = async (patch) => {
     if (!onUpdate) return;
     setSaving(true);
+    setSaveError('');
     try {
       await onUpdate(item, patch);
+    } catch (err) {
+      setSaveError(err.message || 'Save failed');
     } finally {
       setSaving(false);
     }
@@ -111,10 +166,16 @@ export default function TaskDetailDrawer({
     handleSaveField({ comments: updated });
   };
 
+  const VALID_URL_SCHEME = /^https?:\/\//i;
+
   const addAttachmentRow = () => {
     const name = newAttachmentName.trim();
     const url = newAttachmentUrl.trim();
     if (!name || !url) return;
+    if (!VALID_URL_SCHEME.test(url)) {
+      toast('Attachment URL must use http or https scheme', 'error');
+      return;
+    }
     const updated = [
       ...attachments,
       { name, url, size: 1024, uploadedAt: new Date().toISOString() }
@@ -131,14 +192,20 @@ export default function TaskDetailDrawer({
   return (
     <div className="fixed inset-0 z-50 overflow-hidden bg-slate-900/40 backdrop-blur-xs transition-opacity">
       <div className="fixed inset-y-0 right-0 flex max-w-full pl-10">
-        <div className="w-screen max-w-xl border-l border-slate-200 bg-white shadow-2xl flex flex-col">
+        <div
+          ref={panelRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="drawer-title"
+          className="w-screen max-w-xl border-l border-slate-200 bg-white shadow-2xl flex flex-col"
+        >
           {/* Header */}
           <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50/80 px-6 py-4">
             <div className="flex items-center gap-2 min-w-0">
               <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${nodeType === 'FOLDER' ? 'bg-indigo-100 text-indigo-700' : (nodeType === 'MILESTONE' ? 'bg-amber-100 text-amber-800' : 'bg-slate-200 text-slate-700')}`}>
                 {nodeType}
               </span>
-              <h2 className="truncate text-base font-bold text-slate-900">{item.title}</h2>
+              <h2 id="drawer-title" className="truncate text-base font-bold text-slate-900">{item.title}</h2>
             </div>
             <button
               onClick={onClose}
@@ -434,9 +501,15 @@ export default function TaskDetailDrawer({
                     <div key={idx} className="flex items-center justify-between rounded-lg border border-slate-200 p-2.5">
                       <div className="flex items-center gap-2 min-w-0">
                         <Paperclip className="h-4 w-4 text-indigo-600 shrink-0" />
-                        <a href={att.url} target="_blank" rel="noreferrer" className="truncate text-xs font-semibold text-slate-800 hover:text-indigo-600 underline">
-                          {att.name}
-                        </a>
+                        {VALID_URL_SCHEME.test(att.url) ? (
+                          <a href={att.url} target="_blank" rel="noreferrer" className="truncate text-xs font-semibold text-slate-800 hover:text-indigo-600 underline">
+                            {att.name}
+                          </a>
+                        ) : (
+                          <span className="truncate text-xs font-semibold text-slate-800">
+                            {att.name}
+                          </span>
+                        )}
                       </div>
                       <span className="text-[10px] text-slate-400">{new Date(att.uploadedAt).toLocaleDateString()}</span>
                     </div>
@@ -451,7 +524,9 @@ export default function TaskDetailDrawer({
 
           {/* Drawer Footer */}
           <div className="border-t border-slate-200 bg-slate-50 px-6 py-3 flex items-center justify-between text-xs text-slate-500">
-            <span>{saving ? 'Saving changes…' : 'All changes saved'}</span>
+            <span className="flex items-center gap-2">
+              {saving ? 'Saving changes...' : saveError ? <span className="text-rose-600">{saveError}</span> : 'All changes saved'}
+            </span>
             <button onClick={onClose} className="rounded-lg bg-slate-200 px-4 py-1.5 font-semibold text-slate-700 hover:bg-slate-300">
               Done
             </button>

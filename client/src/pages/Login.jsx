@@ -6,11 +6,22 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-  const { login, user } = useAuth();
+  const [submitting, setSubmitting] = useState(false);
+  const { login, user, loading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const from = location.state?.from || '/dashboard';
+
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-100">
+        <div className="flex items-center gap-3 text-slate-500">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-slate-300 border-t-indigo-600"></div>
+          <span className="text-sm font-semibold">Restoring session...</span>
+        </div>
+      </div>
+    );
+  }
 
   if (user) {
     return <Navigate to="/dashboard" replace />;
@@ -19,7 +30,7 @@ export default function Login() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-    setLoading(true);
+    setSubmitting(true);
 
     try {
       await login(email, password);
@@ -27,7 +38,7 @@ export default function Login() {
     } catch (err) {
       setError(err.message || 'Invalid email or password');
     } finally {
-      setLoading(false);
+      setSubmitting(false);
     }
   };
 
@@ -73,10 +84,10 @@ export default function Login() {
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={submitting}
               className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {loading ? (
+              {submitting ? (
                 <>
                   <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
                   Signing in...

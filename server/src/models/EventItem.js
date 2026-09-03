@@ -106,7 +106,9 @@ const eventItemSchema = new mongoose.Schema(
     }
   },
   {
-    timestamps: true
+    timestamps: true,
+    versionKey: '__v',
+    optimisticConcurrency: true
   }
 );
 

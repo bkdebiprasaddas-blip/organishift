@@ -27,23 +27,29 @@ class EventPlanService {
       const idMap = new Map();
       const createdPlanItems = [];
 
-      for (const libItem of libBranch) {
+       for (const libItem of libBranch) {
         const parentPlanId = libItem.parentId ? idMap.get(String(libItem.parentId)) : null;
 
         let parentPath = ',';
+        let computedLevel = 0;
         if (parentPlanId) {
-          const parentDoc = await PlanningItem.findById(parentPlanId).session(session);
+          const parentDoc = await PlanningItem.findById(parentPlanId, null, sopt);
           parentPath = parentDoc.path;
+          computedLevel = parentDoc.level + 1;
         }
 
         const pItem = new PlanningItem({
           title: libItem.title,
           description: libItem.description,
+          nodeType: libItem.nodeType || 'TASK',
+          operationalNotes: libItem.operationalNotes || '',
+          tags: libItem.tags || [],
+          checklist: (libItem.checklist || []).map(c => ({ text: c.text, completed: c.completed })),
           parentId: parentPlanId || null,
           planId: plan._id,
           scope: 'PLAN',
           path: ',',
-          level: libItem.level,
+          level: computedLevel,
           order: libItem.order,
           sourceLibraryItemId: libItem._id,
           createdBy: userId
@@ -64,6 +70,17 @@ class EventPlanService {
     const plan = await EventPlan.findById(planId);
     if (!plan) {
       throw new ApiError(404, 'PLAN_NOT_FOUND', 'Event plan not found');
+    }
+
+    // SV-M13: prevent deletion when events reference this plan (dangling planId)
+    const Event = require('../models/Event');
+    const referencingEvents = await Event.find({ planId }).select('_id');
+    if (referencingEvents.length > 0) {
+      throw new ApiError(
+        409,
+        'CONFLICT',
+        `Cannot delete plan — ${referencingEvents.length} scheduled event(s) reference it. Unschedule or reassign those events first.`
+      );
     }
 
     await withTx(async (session) => {

@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Outlet, NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useEventTitle } from '../context/EventTitleContext';
 import api from '../services/api';
-import { LayoutDashboard, FolderTree, ClipboardList, CalendarDays, ListChecks, LogOut, Menu } from 'lucide-react';
+import { LayoutDashboard, FolderTree, ClipboardList, CalendarDays, ListChecks, LogOut, Menu, X } from 'lucide-react';
 
 export default function Layout() {
   const { user, logout } = useAuth();
@@ -11,6 +12,7 @@ export default function Layout() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [isDesktop, setIsDesktop] = useState(() => window.matchMedia('(min-width: 768px)').matches);
   const [eventTitle, setEventTitle] = useState('');
+  const eventTitleCtx = useEventTitle();
 
   useEffect(() => {
     const mq = window.matchMedia('(min-width: 768px)');
@@ -40,9 +42,17 @@ export default function Layout() {
       setEventTitle('');
       return undefined;
     }
+
+    // CL-M4: try shared title first (set by EventExecution) to avoid duplicate fetch
+    const shared = eventTitleCtx.getTitle(eventId);
+    if (shared) {
+      setEventTitle(shared);
+      return undefined;
+    }
+
     let alive = true;
     api.get(`/events/${eventId}`)
-      .then(ev => { if (alive) setEventTitle(ev.title || 'Event Execution'); })
+      .then(ev => { if (alive) setEventTitle((ev.event?.title || ev.title) || 'Event Execution'); })
       .catch(() => {});
     return () => { alive = false; };
   }, [eventId]);
@@ -104,7 +114,7 @@ export default function Layout() {
         <button
           aria-label="Close navigation"
           onClick={() => setDrawerOpen(false)}
-          className="fixed inset-0 z-20 bg-slate-900/40 md:hidden"
+          className="fixed inset-0 z-30 bg-slate-900/40 md:hidden"
         />
       )}
 
@@ -112,28 +122,34 @@ export default function Layout() {
         id="sidebar"
         {...(drawerHidden ? { inert: '' } : {})}
         aria-hidden={drawerHidden}
-        className={`fixed inset-y-0 left-0 z-30 flex w-[248px] flex-col border-r border-slate-200 bg-white transition-transform duration-200 md:translate-x-0 ${drawerOpen ? 'translate-x-0' : '-translate-x-full'}`}
+        className={`fixed inset-y-0 left-0 z-40 flex w-[248px] flex-col border-r border-slate-200 bg-white transition-transform duration-200 md:translate-x-0 ${drawerOpen ? 'translate-x-0' : '-translate-x-full'}`}
       >
-        <div className="flex h-16 items-center border-b border-slate-200 px-5">
+        <div className="flex h-16 items-center justify-between border-b border-slate-200 px-5">
           <img src="/assets/logo-horizontal.svg" alt="OrganiShift" className="h-8 w-auto" />
+          <button
+            onClick={() => setDrawerOpen(false)}
+            aria-label="Close navigation"
+            className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 transition md:hidden"
+          >
+            <X size={18} />
+          </button>
         </div>
 
-        <nav aria-label="Main" className="flex-1 space-y-1 px-3 py-4">
+        <nav aria-label="Main" className="flex-1 space-y-1 overflow-y-auto px-3 py-4">
           {getNavLinks().map((link) => (
             <NavLink
               key={link.to}
               to={link.to}
-              className={({ isActive }) =>
-                `nav-item relative flex min-h-[44px] items-center gap-3 rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 transition ${isActive ? 'active' : ''}`
-              }
+              className={({ isActive }) => {
+                const isItemActive = isActive || (link.to === '/execution' && location.pathname.startsWith('/events/'));
+                return `nav-item relative flex min-h-[44px] items-center gap-3 rounded-lg px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 transition ${isItemActive ? 'active' : ''}`;
+              }}
             >
               <span className="accent-bar absolute left-0 top-1.5 bottom-1.5 hidden w-1 rounded-r bg-indigo-600"></span>
               {link.icon}{link.label}
             </NavLink>
           ))}
         </nav>
-
-        <div className="flex-1"></div>
 
         <div className="border-t border-slate-200 p-3">
           <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-2 py-1.5">

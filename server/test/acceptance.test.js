@@ -300,3 +300,117 @@ test('T-18: member sees owned branch (assigned node + descendants) + ancestors, 
   assert.deepStrictEqual(ids, [ownedBranch, leafA, leafB].map(i => String(i._id)).sort());
   assert.ok(!ids.includes(String(other._id)));
 });
+
+// ---------- SV-H2: IDOR — MEMBER cannot edit content fields of foreign items ----------
+test('SV-H2: member editing foreign item title -> 403; editing own-branch item -> 200', async () => {
+  const { event, mk } = await makeEventWithTree();
+  const ownedBranch = await mk('OwnedBranch', null, ',', 0, 0, { assigneeId: memberUser._id });
+  const foreign = await mk('ForeignLeaf', ownedBranch._id, ownedBranch.path, 1, 0);
+
+  // Member assigned to a different branch should NOT own foreignBranch
+  const foreignBranch = await mk('ForeignBranch', null, ',', 0, 1, { assigneeId: adminUser._id });
+  const foreignLeaf = await mk('ForeignLeaf2', foreignBranch._id, foreignBranch.path, 1, 0);
+
+  // Member editing foreign (not in their branch) item title -> 403
+  await assert.rejects(
+    () => eventService.updateExecutionItem(foreignLeaf._id, { title: 'hacked' }, memberUser),
+    err => err.statusCode === 403
+  );
+
+  // Member editing own-branch item title -> 200
+  const ok = await eventService.updateExecutionItem(String(ownedBranch._id), { title: 'renamed' }, memberUser);
+  assert.strictEqual(ok.title, 'renamed');
+});
+
+// ---------- SV-H3: Comment author spoofing + javascript: URL rejected ----------
+test('SV-H3: member posts comment with forged user -> stored author is the member', async () => {
+  const { mk } = await makeEventWithTree();
+  const leaf = await mk('Leaf', null, ',', 0, 0, { assigneeId: memberUser._id });
+
+  const result = await eventService.updateExecutionItem(
+    String(leaf._id),
+    { comments: [{ text: 'test comment', user: adminUser._id, userName: 'Admin' }] },
+    memberUser
+  );
+  assert.strictEqual(result.comments[0].user.toString(), String(memberUser._id));
+  assert.strictEqual(result.comments[0].userName, memberUser.name);
+});
+
+test('SV-H3: javascript: attachment URL rejected', async () => {
+  const { mk } = await makeEventWithTree();
+  const leaf = await mk('Leaf', null, ',', 0, 0, { assigneeId: memberUser._id });
+
+  await assert.rejects(
+    () => eventService.updateExecutionItem(
+      String(leaf._id),
+      { attachments: [{ name: 'evil', url: 'javascript:alert(1)' }] },
+      memberUser
+    ),
+    err => err.statusCode === 400
+  );
+});
+
+// ---------- SV-H4: MEMBER progress endpoint returns scoped tree ----------
+test('SV-H4: member progress tree is scoped to owned branch', async () => {
+  const { event, mk } = await makeEventWithTree();
+  const ownedBranch = await mk('OwnedBranch', null, ',', 0, 0, { assigneeId: memberUser._id });
+  await mk('A', ownedBranch._id, ownedBranch.path, 1, 0);
+  const other = await mk('OtherBranch', null, ',', 0, 1);
+
+  const result = await progressService.recalculate(event._id, null, memberUser);
+
+  const visibleIds = result.tree.flatMap(n => {
+    const collect = (node) => {
+      const ids = [String(node._id)];
+      if (node.children) node.children.forEach(c => ids.push(...collect(c)));
+      return ids;
+    };
+    return collect(n);
+  });
+
+  assert.ok(visibleIds.includes(String(ownedBranch._id)));
+  assert.ok(!visibleIds.includes(String(other._id)));
+
+  // Admin sees everything
+  const adminResult = await progressService.recalculate(event._id);
+  const allIds = adminResult.tree.flatMap(n => {
+    const collect = (node) => {
+      const ids = [String(node._id)];
+      if (node.children) node.children.forEach(c => ids.push(...collect(c)));
+      return ids;
+    };
+    return collect(n);
+  });
+  assert.ok(allIds.includes(String(other._id)));
+});
+
+// ---------- SV-M12: Optimistic concurrency on EventItem ----------
+test('SV-M12: conflicting concurrent writes -> 409 CONFLICT', async () => {
+  const { event, mk } = await makeEventWithTree();
+  const leaf = await mk('Leaf', null, ',', 0, 0, { status: 'NOT_STARTED' });
+
+  // Simulate two concurrent writers both holding the same snapshot version.
+  // Writer A commits first; writer B's commit uses the stale version and must fail.
+  const versionA = (await EventItem.findById(leaf._id)).__v;
+
+  // Writer A succeeds — increments version
+  const updatedA = await EventItem.findOneAndUpdate(
+    { _id: leaf._id, __v: versionA },
+    { $set: { status: 'IN_PROGRESS' }, $inc: { __v: 1 } },
+    { new: true, runValidators: true }
+  );
+  assert.ok(updatedA, 'Writer A should succeed');
+
+  // Writer B uses stale version — should fail (null)
+  const updatedB = await EventItem.findOneAndUpdate(
+    { _id: leaf._id, __v: versionA },
+    { $set: { title: 'stale' }, $inc: { __v: 1 } },
+    { new: true, runValidators: true }
+  );
+  assert.strictEqual(updatedB, null, 'Writer B should conflict on stale version');
+
+  // Verify the item reflects Writer A's change, not Writer B's
+  const finalDoc = await EventItem.findById(leaf._id);
+  assert.strictEqual(finalDoc.status, 'IN_PROGRESS');
+  assert.notStrictEqual(finalDoc.title, 'stale');
+});

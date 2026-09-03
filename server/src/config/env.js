@@ -6,8 +6,9 @@ module.exports = {
   MONGO_URI: process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/organishift',
   JWT_SECRET: (() => {
     const s = process.env.JWT_SECRET;
-    if (!s && process.env.NODE_ENV === 'production') {
-      throw new Error('JWT_SECRET must be set in production');
+    // SV-L3: fail-closed unless explicitly development
+    if (!s && process.env.NODE_ENV !== 'development') {
+      throw new Error('JWT_SECRET must be set');
     }
     return s || 'dev-only-insecure-secret-change-me';
   })(),

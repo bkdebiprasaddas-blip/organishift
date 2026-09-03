@@ -20,7 +20,8 @@ const getUsers = asyncHandler(async (req, res) => {
   const users = await User.find({ isActive: true }).select('-passwordHash').sort({ name: 1 });
   return res.status(200).json({
     success: true,
-    data: users
+    data: users,
+    message: 'Users retrieved'
   });
 });
 
@@ -55,7 +56,8 @@ const getUserById = asyncHandler(async (req, res) => {
   }
   return res.status(200).json({
     success: true,
-    data: user
+    data: user,
+    message: 'User retrieved'
   });
 });
 
@@ -64,6 +66,30 @@ const updateUser = asyncHandler(async (req, res) => {
   const user = await User.findById(req.params.id);
   if (!user) {
     throw new ApiError(404, 'NOT_FOUND', 'User not found');
+  }
+
+  // SV-M8: prevent self-demotion/deactivation
+  if (String(req.params.id) === String(req.user._id)) {
+    if (parsed.role && parsed.role !== user.role) {
+      throw new ApiError(409, 'VALIDATION_ERROR', 'Cannot change your own role');
+    }
+    if (parsed.isActive === false) {
+      throw new ApiError(409, 'VALIDATION_ERROR', 'Cannot deactivate yourself');
+    }
+  }
+
+  // SV-M8: prevent removing the last active admin
+  if (parsed.role && parsed.role !== 'ADMIN' && user.role === 'ADMIN' && user.isActive) {
+    const adminCount = await User.countDocuments({ role: 'ADMIN', isActive: true });
+    if (adminCount <= 1) {
+      throw new ApiError(409, 'VALIDATION_ERROR', 'Cannot demote the last active admin');
+    }
+  }
+  if (parsed.isActive === false && user.role === 'ADMIN' && user.isActive) {
+    const adminCount = await User.countDocuments({ role: 'ADMIN', isActive: true });
+    if (adminCount <= 1) {
+      throw new ApiError(409, 'VALIDATION_ERROR', 'Cannot deactivate the last active admin');
+    }
   }
 
   if (parsed.name) user.name = parsed.name;
@@ -83,6 +109,19 @@ const deleteUser = asyncHandler(async (req, res) => {
   const user = await User.findById(req.params.id);
   if (!user) {
     throw new ApiError(404, 'NOT_FOUND', 'User not found');
+  }
+
+  // SV-M8: prevent self-deactivation
+  if (String(req.params.id) === String(req.user._id)) {
+    throw new ApiError(409, 'VALIDATION_ERROR', 'Cannot deactivate yourself');
+  }
+
+  // SV-M8: prevent removing the last active admin
+  if (user.role === 'ADMIN' && user.isActive) {
+    const adminCount = await User.countDocuments({ role: 'ADMIN', isActive: true });
+    if (adminCount <= 1) {
+      throw new ApiError(409, 'VALIDATION_ERROR', 'Cannot deactivate the last active admin');
+    }
   }
 
   user.isActive = false;

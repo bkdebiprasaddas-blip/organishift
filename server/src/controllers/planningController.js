@@ -37,7 +37,8 @@ const getItems = asyncHandler(async (req, res) => {
   const tree = await planningService.getTree(req.query);
   return res.status(200).json({
     success: true,
-    data: tree
+    data: tree,
+    message: 'Planning items retrieved'
   });
 });
 
@@ -56,11 +57,12 @@ const getItemById = asyncHandler(async (req, res) => {
   if (!item) {
     throw new ApiError(404, 'NOT_FOUND', 'Planning item not found');
   }
-  return res.status(200).json({
-    success: true,
-    data: item
-  });
-});
+   return res.status(200).json({
+     success: true,
+     data: item,
+     message: 'Planning item retrieved'
+   });
+ });
 
 const updateItem = asyncHandler(async (req, res) => {
   const parsed = updateItemSchema.parse(req.body);
@@ -71,6 +73,10 @@ const updateItem = asyncHandler(async (req, res) => {
 
   if (parsed.title !== undefined) item.title = parsed.title;
   if (parsed.description !== undefined) item.description = parsed.description;
+  if (parsed.nodeType !== undefined) item.nodeType = parsed.nodeType;
+  if (parsed.operationalNotes !== undefined) item.operationalNotes = parsed.operationalNotes;
+  if (parsed.tags !== undefined) item.tags = parsed.tags;
+  if (parsed.checklist !== undefined) item.checklist = parsed.checklist;
   if (parsed.order !== undefined) item.order = parsed.order;
 
   await item.save();
@@ -83,8 +89,12 @@ const updateItem = asyncHandler(async (req, res) => {
 });
 
 const moveItem = asyncHandler(async (req, res) => {
-  const { newParentId } = req.body;
-  const item = await planningService.moveItem(req.params.id, newParentId);
+  // SV-L6: validate body — newParentId required (missing -> 400, not silent move-to-root)
+  const schema = z.object({
+    newParentId: z.string().nullable()
+  });
+  const parsed = schema.parse(req.body);
+  const item = await planningService.moveItem(req.params.id, parsed.newParentId);
   return res.status(200).json({
     success: true,
     data: item,

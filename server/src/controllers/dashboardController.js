@@ -24,9 +24,20 @@ const getDashboardStats = asyncHandler(async (req, res) => {
   const pending = total - completed;
 
   const today = new Date();
-  const overdue = leaves.filter(i => i.dueDate && new Date(i.dueDate) < today && i.status !== 'COMPLETED').length;
+  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const overdue = leaves.filter(i => i.dueDate && new Date(i.dueDate) < startOfToday && i.status !== 'COMPLETED').length;
 
-  const events = await Event.find({});
+  // SV-M10: scope events for MEMBERs — only events where they have assigned work
+  let events;
+  if (user.role === 'MEMBER') {
+    const assignedItemIds = items.map(i => i.assigneeId);
+    const assignedEventIds = new Set(items
+      .filter(i => String(i.assigneeId?._id ?? i.assigneeId) === String(user._id))
+      .map(i => String(i.eventId)));
+    events = await Event.find({ _id: { $in: Array.from(assignedEventIds) } }).sort({ startDate: 1 });
+  } else {
+    events = await Event.find({}).sort({ startDate: 1 });
+  }
   const overallProgress = events.length > 0
     ? Math.round(events.reduce((acc, e) => acc + (e.progressPercent || 0), 0) / events.length)
     : 0;
@@ -53,7 +64,7 @@ const getDashboardStats = asyncHandler(async (req, res) => {
         status: i.status,
         priority: i.priority,
         dueDate: i.dueDate,
-        isOverdue: Boolean(i.dueDate && new Date(i.dueDate) < today && i.status !== 'COMPLETED'),
+        isOverdue: Boolean(i.dueDate && new Date(i.dueDate) < startOfToday && i.status !== 'COMPLETED'),
         eventId: i.eventId,
         eventTitle: ev ? ev.title : '',
         allowedTransitions: TRANSITIONS[i.status] || []
@@ -74,7 +85,8 @@ const getDashboardStats = asyncHandler(async (req, res) => {
       },
       upcomingEvents,
       myWork
-    }
+    },
+    message: 'Dashboard stats retrieved'
   });
 });
 

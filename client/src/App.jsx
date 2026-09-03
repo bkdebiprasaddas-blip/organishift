@@ -1,5 +1,6 @@
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './context/AuthContext';
+import { EventTitleProvider } from './context/EventTitleContext';
 import { ToastProvider } from './components/common/Toast';
 import Layout from './components/Layout';
 import Login from './pages/Login';
@@ -39,6 +40,7 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
 function App() {
   return (
     <AuthProvider>
+      <EventTitleProvider>
       <ToastProvider>
         <Router>
         <Routes>
@@ -67,6 +69,7 @@ function App() {
         </Routes>
         </Router>
       </ToastProvider>
+      </EventTitleProvider>
     </AuthProvider>
   );
 }

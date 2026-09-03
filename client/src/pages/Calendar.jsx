@@ -20,7 +20,8 @@ export default function Calendar() {
 
   const [events, setEvents] = useState([]);
   const [plans, setPlans] = useState([]);
-  const [error, setError] = useState('');
+   const [error, setError] = useState('');
+  const [loadingEvents, setLoadingEvents] = useState(true);
   const [cursor, setCursor] = useState(() => new Date());
   const [showDialog, setShowDialog] = useState(false);
   const [dayPopover, setDayPopover] = useState(null); // date key with >2 events (IMP-C11)
@@ -31,15 +32,19 @@ export default function Calendar() {
 
   const loadEvents = () => {
     setError('');
+    setLoadingEvents(true);
     api.get('/events')
       .then(setEvents)
-      .catch(err => setError(err.message || 'Failed to load events'));
+      .catch(err => setError(err.message || 'Failed to load events'))
+      .finally(() => setLoadingEvents(false));
   };
 
   useEffect(() => {
-    loadEvents();
-    if (canSchedule) api.get('/event-plans').then(setPlans).catch(() => {});
-  }, [canSchedule]);
+     loadEvents();
+     if (canSchedule) api.get('/event-plans')
+       .then(setPlans)
+       .catch(() => showToast('Failed to load event plans', 'error'));
+   }, [canSchedule, showToast]);
 
   const year = cursor.getFullYear();
   const month = cursor.getMonth();
@@ -47,25 +52,28 @@ export default function Calendar() {
 
   const cells = useMemo(() => {
     const first = new Date(year, month, 1);
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
     const start = new Date(first);
     start.setDate(1 - first.getDay());
-    return Array.from({ length: 35 }, (_, i) => {
+    const totalCells = Math.ceil((first.getDay() + daysInMonth) / 7) * 7;
+    return Array.from({ length: totalCells }, (_, i) => {
       const d = new Date(start);
       d.setDate(start.getDate() + i);
       return d;
     });
   }, [year, month]);
 
-  const dateKey = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const dateKey = d => new Date(d).toLocaleDateString('sv');
 
   const eventsByDate = useMemo(() => {
     const map = {};
     events.forEach(e => {
-      const key = dateKey(new Date(e.startDate));
+      const startDate = new Date(e.startDate);
+      const key = dateKey(startDate);
       (map[key] = map[key] || []).push(e);
-      // multi-day span
+      // multi-day span — iterate day-by-day using local date arithmetic
       if (e.endDate) {
-        let cur = new Date(key);
+        let cur = new Date(startDate);
         const end = new Date(e.endDate);
         while (cur < end) {
           cur.setDate(cur.getDate() + 1);
@@ -125,6 +133,19 @@ export default function Calendar() {
 
       {error ? (
         <ErrorState message={error} onRetry={loadEvents} />
+      ) : loadingEvents ? (
+        <div className="grid grid-cols-7 gap-px overflow-hidden rounded-xl border border-slate-200 bg-slate-200 shadow-card">
+          {Array.from({ length: 42 }).map((_, i) => (
+            <div key={i} className="bg-white p-1.5">
+              <div className="h-4 w-6 rounded bg-slate-200 animate-pulse" />
+            </div>
+          ))}
+        </div>
+      ) : events.length === 0 ? (
+        <div className="flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white py-12 shadow-card">
+          <CalendarPlus className="h-8 w-8 text-slate-300" />
+          <p className="mt-2 text-xs text-slate-400">No events scheduled for this period.</p>
+        </div>
       ) : (
         <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-card">
           <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50">
@@ -211,8 +232,11 @@ export default function Calendar() {
         <Modal onClose={() => !scheduling && setShowDialog(false)} labelledBy="schedule-title">
           <h3 id="schedule-title" className="mb-4 text-base font-bold text-slate-900">Schedule New Event</h3>
           <div className="space-y-3">
-            <select value={form.planId} onChange={e => setForm(f => ({ ...f, planId: e.target.value }))} aria-label="Plan" className="w-full rounded-lg border border-slate-300 p-2 text-xs font-semibold">
-              <option value="">Select plan…</option>
+            <select value={form.planId} onChange={e => setForm(f => ({ ...f, planId: e.target.value }))} aria-label="Plan" className="w-full rounded-lg border border-slate-300 p-2 text-xs font-semibold" disabled={plans.length === 0}>
+              <option value="">Select plan...</option>
+              {plans.length === 0 && (
+                <option value="" disabled>No plans available — ask an Admin to create one</option>
+              )}
               {plans.map(p => <option key={p._id} value={p._id}>{p.title}</option>)}
             </select>
             <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="Event title" aria-label="Event title" className="w-full rounded-lg border border-slate-300 p-2 text-xs font-semibold" />

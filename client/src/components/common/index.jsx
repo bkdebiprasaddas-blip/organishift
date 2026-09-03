@@ -52,7 +52,7 @@ export function Modal({ onClose, children, labelledBy, wide = false }) {
         previouslyFocused.focus();
       }
     };
-  }, [onClose]);
+  }, []);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onMouseDown={onClose}>
@@ -70,7 +70,7 @@ export function Modal({ onClose, children, labelledBy, wide = false }) {
   );
 }
 
-export function ConfirmDialog({ title, message, confirmLabel = 'Delete', onConfirm, onCancel }) {
+export function ConfirmDialog({ title, message, confirmLabel = 'Delete', onConfirm, onCancel, busy = false }) {
   return (
     <Modal onClose={onCancel} labelledBy="confirm-title">
       <div className="flex items-start gap-3">
@@ -83,8 +83,8 @@ export function ConfirmDialog({ title, message, confirmLabel = 'Delete', onConfi
         </div>
       </div>
       <div className="mt-5 flex justify-end gap-2">
-        <button onClick={onCancel} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50">Cancel</button>
-        <button onClick={onConfirm} className="rounded-lg bg-rose-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-rose-500">{confirmLabel}</button>
+        <button onClick={onCancel} disabled={busy} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Cancel</button>
+        <button onClick={onConfirm} disabled={busy} className="rounded-lg bg-rose-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-rose-500 disabled:opacity-50">{busy ? 'Deleting...' : confirmLabel}</button>
       </div>
     </Modal>
   );

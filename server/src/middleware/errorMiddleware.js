@@ -41,9 +41,23 @@ const errorMiddleware = (err, req, res, next) => {
     message = `Invalid ID format: ${err.value}`;
   }
 
-  // Log stack trace in non-production
-  if (env.NODE_ENV !== 'production' && statusCode === 500) {
+  // Handle Mongoose optimistic concurrency conflict (SV-M12)
+  if (err.name === 'VersionError') {
+    statusCode = 409;
+    code = 'CONFLICT';
+    message = 'Item was modified by another user. Please refresh and try again.';
+    details = null;
+  }
+
+  // Log stack trace (always, for server-side visibility)
+  if (statusCode === 500) {
     console.error('[SERVER ERROR]', err);
+  }
+
+  // SV-M9: production never returns internal error details to client
+  if (env.NODE_ENV === 'production' && statusCode === 500) {
+    message = 'An unexpected server error occurred';
+    details = null;
   }
 
   return res.status(statusCode).json({

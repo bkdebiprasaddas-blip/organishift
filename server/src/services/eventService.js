@@ -96,63 +96,102 @@ class EventService {
       }
     }
 
-    if (title !== undefined) item.title = title;
-    if (nodeType !== undefined) item.nodeType = nodeType;
-    if (description !== undefined) item.description = description;
-    if (operationalNotes !== undefined) item.operationalNotes = operationalNotes;
-    if (tags !== undefined) item.tags = tags;
-    if (checklist !== undefined) item.checklist = checklist;
-    if (comments !== undefined) item.comments = comments;
-    if (attachments !== undefined) item.attachments = attachments;
-    if (assigneeId !== undefined) item.assigneeId = assigneeId || null;
-    if (priority !== undefined) item.priority = priority;
-    if (dueDate !== undefined) item.dueDate = dueDate ? new Date(dueDate) : null;
+    // SV-L14: validate assigneeId refers to an existing active user
+    if (assigneeId !== undefined && assigneeId !== null) {
+      const User = require('../models/User');
+      const assignee = await User.findById(assigneeId);
+      if (!assignee || !assignee.isActive) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Assignee must be an existing active user');
+      }
+    }
 
-    // Status Change Handling
+    // Member ownership check for content fields (§2.7 / SV-H2)
+    const contentUpdates = [title, nodeType, description, operationalNotes, tags, checklist, comments, attachments];
+    const hasContentUpdate = contentUpdates.some(v => v !== undefined);
+    if (user.role === 'MEMBER' && hasContentUpdate) {
+      const pathIds = item.path.split(',').filter(Boolean);
+      const ancestors = await EventItem.find({ _id: { $in: pathIds } });
+      const isOwned = ancestors.some(a => String(a.assigneeId) === String(user._id));
+      if (!isOwned) {
+        throw new ApiError(403, 'FORBIDDEN', 'Members can only edit items in their assigned branch');
+      }
+    }
+
+    const updateFields = {};
+    if (title !== undefined) updateFields.title = title;
+    if (nodeType !== undefined) updateFields.nodeType = nodeType;
+    if (description !== undefined) updateFields.description = description;
+    if (operationalNotes !== undefined) updateFields.operationalNotes = operationalNotes;
+    if (tags !== undefined) updateFields.tags = tags;
+    if (checklist !== undefined) updateFields.checklist = checklist;
+    if (comments !== undefined) {
+      // SV-H3: server derives comment author from authenticated user
+      updateFields.comments = comments.map(c => ({
+        text: c.text,
+        user: user._id,
+        userName: user.name,
+        createdAt: c.createdAt || new Date()
+      }));
+    }
+    if (attachments !== undefined) {
+      // SV-H3: URL scheme validated by zod + service defense-in-depth
+      const VALID_URL_SCHEME = /^https?:\/\//i;
+      attachments.forEach(a => {
+        if (!VALID_URL_SCHEME.test(a.url)) {
+          throw new ApiError(400, 'VALIDATION_ERROR', 'Attachment URL must use http or https scheme');
+        }
+      });
+      updateFields.attachments = attachments;
+    }
+    if (assigneeId !== undefined) updateFields.assigneeId = assigneeId || null;
+    if (priority !== undefined) updateFields.priority = priority;
+    if (dueDate !== undefined) updateFields.dueDate = dueDate ? new Date(dueDate) : null;
+
+    // SV-M12: optimistic concurrency — atomic conditional update prevents
+    // read-modify-write races; write applies only if version is unchanged.
+    // Status changes require leaf check + ownership/transition validation first.
     if (status !== undefined && status !== item.status) {
-      // Leaf check: Status is editable ONLY on leaves
       const childCount = await EventItem.countDocuments({ parentId: item._id });
       if (childCount > 0) {
         throw new ApiError(400, 'NOT_A_LEAF', 'Cannot manually change status on a parent node');
       }
 
-      // Member ownership check (§2.7)
       if (user.role === 'MEMBER') {
-        // User must be assignee of self or any ancestor (via path)
         const pathIds = item.path.split(',').filter(Boolean);
         const ancestors = await EventItem.find({ _id: { $in: pathIds } });
         const isOwned = ancestors.some(a => String(a.assigneeId) === String(user._id));
-
         if (!isOwned) {
           throw new ApiError(403, 'FORBIDDEN', 'Members can only update status on items assigned to them or their branch');
         }
-
-        // Member cannot re-open COMPLETED
         if (item.status === 'COMPLETED') {
           throw new ApiError(403, 'FORBIDDEN', 'Members cannot re-open completed items');
         }
       }
 
-      // Status Transition Table (§2.11)
       const validTransitions = {
         'NOT_STARTED': ['IN_PROGRESS', 'BLOCKED'],
         'IN_PROGRESS': ['COMPLETED', 'BLOCKED'],
         'BLOCKED': ['IN_PROGRESS'],
-        'COMPLETED': ['IN_PROGRESS'] // Re-open (Manager/Admin only)
+        'COMPLETED': ['IN_PROGRESS']
       };
-
       const allowed = validTransitions[item.status] || [];
       if (!allowed.includes(status)) {
         throw new ApiError(400, 'INVALID_TRANSITION', `Invalid status transition from ${item.status} to ${status}`);
       }
-
-      item.status = status;
+      updateFields.status = status;
     }
 
-    await item.save();
+    const updated = await EventItem.findOneAndUpdate(
+      { _id: itemId, __v: item.__v },
+      { $set: updateFields, $inc: { __v: 1 } },
+      { new: true, runValidators: true }
+    );
+    if (!updated) {
+      throw new ApiError(409, 'CONFLICT', 'Item was modified by another user. Please refresh and try again.');
+    }
     await progressService.recalculate(item.eventId);
 
-    return item;
+    return updated;
   }
 }
 

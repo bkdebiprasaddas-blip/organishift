@@ -9,7 +9,7 @@ const eventPlanService = require('../services/eventPlanService');
 const createPlanSchema = z.object({
   title: z.string().min(3).max(120),
   description: z.string().max(500).optional(),
-  category: z.string().optional(),
+  category: z.string().max(60).optional(),
   isTemplate: z.boolean().optional()
 });
 
@@ -24,7 +24,8 @@ const getPlans = asyncHandler(async (req, res) => {
   const plans = await EventPlan.find({}).sort({ updatedAt: -1 });
   return res.status(200).json({
     success: true,
-    data: plans
+    data: plans,
+    message: 'Event plans retrieved'
   });
 });
 
@@ -60,7 +61,8 @@ const getPlanById = asyncHandler(async (req, res) => {
     data: {
       plan,
       tree
-    }
+    },
+    message: 'Event plan retrieved'
   });
 });
 

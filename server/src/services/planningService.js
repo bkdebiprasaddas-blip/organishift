@@ -8,8 +8,19 @@ class PlanningService {
   async getTree(query) {
     const { scope, planId } = query;
     const filter = {};
-    if (scope) filter.scope = scope;
-    if (planId) filter.planId = planId;
+    // SV-L1: validate query params to prevent NoSQL operator injection
+    if (scope) {
+      if (typeof scope !== 'string' || !['LIBRARY', 'PLAN'].includes(scope)) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Scope must be LIBRARY or PLAN');
+      }
+      filter.scope = scope;
+    }
+    if (planId) {
+      if (typeof planId !== 'string') {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Invalid planId');
+      }
+      filter.planId = planId;
+    }
 
     const items = await PlanningItem.find(filter).sort({ level: 1, order: 1 });
     return buildTree(items);
@@ -17,6 +28,14 @@ class PlanningService {
 
   async createItem(data, userId) {
     const { title, description, operationalNotes, nodeType, tags, checklist, parentId, planId, scope, order } = data;
+
+    // SV-M4: LIBRARY items must not have planId; PLAN items require planId
+    if (scope === 'LIBRARY' && planId) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Library items cannot have a planId');
+    }
+    if (scope === 'PLAN' && !planId) {
+      throw new ApiError(400, 'VALIDATION_ERROR', 'Plan items require a planId');
+    }
 
     let level = 0;
     let parentPath = ',';
@@ -28,6 +47,10 @@ class PlanningService {
       }
       if (parent.scope !== scope) {
         throw new ApiError(400, 'VALIDATION_ERROR', 'Parent scope must match item scope');
+      }
+      // SV-M4: PLAN scope requires matching planId
+      if (scope === 'PLAN' && String(parent.planId) !== String(planId)) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Plan ID must match parent plan');
       }
       level = parent.level + 1;
       parentPath = parent.path;
@@ -73,6 +96,15 @@ class PlanningService {
         throw new ApiError(404, 'NOT_FOUND', 'New parent item not found');
       }
 
+      // SV-M1: require same scope
+      if (newParent.scope !== item.scope) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Cannot move item across different scopes');
+      }
+      // PLAN scope: require same planId
+      if (item.scope === 'PLAN' && String(newParent.planId) !== String(item.planId)) {
+        throw new ApiError(400, 'VALIDATION_ERROR', 'Cannot move item across different plans');
+      }
+
       // Cycle Check: New parent's path cannot contain item's ID
       if (newParent.path.includes(`,${id},`)) {
         throw new ApiError(400, 'CYCLE_DETECTED', 'Cannot move an item under one of its descendants');
@@ -86,22 +118,27 @@ class PlanningService {
     const newPath = `${newParentPath}${item._id},`;
     const levelDelta = newLevel - item.level;
 
-    // Update item and all descendants in path
-    item.parentId = newParentId || null;
-    item.level = newLevel;
-    item.path = newPath;
-    await item.save();
+    // SV-M2: wrap in transaction for atomic subtree re-pathing
+    return withTx(async (session) => {
+      const sopt = session ? { session } : {};
 
-    // Re-path descendants
-    const descendants = await PlanningItem.find({ path: new RegExp(`,${id},`) });
-    for (const desc of descendants) {
-      if (String(desc._id) === String(id)) continue;
-      desc.path = desc.path.replace(oldPath, newPath);
-      desc.level = desc.level + levelDelta;
-      await desc.save();
-    }
+      // Update item
+      item.parentId = newParentId || null;
+      item.level = newLevel;
+      item.path = newPath;
+      await item.save(sopt);
 
-    return item;
+      // Re-path descendants
+      const descendants = await PlanningItem.find({ path: new RegExp(`,${id},`) }, null, sopt);
+      for (const desc of descendants) {
+        if (String(desc._id) === String(id)) continue;
+        desc.path = desc.path.replace(oldPath, newPath);
+        desc.level = desc.level + levelDelta;
+        await desc.save(sopt);
+      }
+
+      return item;
+    });
   }
 
   async deleteSubtree(id) {

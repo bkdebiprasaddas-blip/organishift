@@ -9,7 +9,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/common/Toast';
 import TreeView from '../components/common/TreeView';
 import DropdownMenu from '../components/common/DropdownMenu';
-import { Modal, ConfirmDialog, EmptyState, ErrorState, SkeletonCard } from '../components/common';
+import { Modal, ConfirmDialog, Spinner, EmptyState, ErrorState, SkeletonCard } from '../components/common';
 
 export default function EventPlans() {
   const { user } = useAuth();
@@ -32,6 +32,8 @@ export default function EventPlans() {
 
   const toast = useToast();
 
+  const [itemsLoading, setItemsLoading] = useState(false);
+
   // IMP-B1: surface load errors instead of faking an empty list
   const loadPlans = () => {
     setLoading(true);
@@ -45,12 +47,16 @@ export default function EventPlans() {
   const loadPlanItems = useCallback(id => {
     if (!id) {
       setPlanTree([]);
+      setItemsError('');
       return;
     }
     setItemsError('');
+    setItemsLoading(true);
+    setPlanTree([]); // CL-M8: clear tree to avoid flash of stale plan data
     api.get('/planning-items', { params: { scope: 'PLAN', planId: id } })
       .then(setPlanTree)
-      .catch(err => setItemsError(err.message || 'Failed to load plan modules'));
+      .catch(err => setItemsError(err.message || 'Failed to load plan modules'))
+      .finally(() => setItemsLoading(false));
   }, []);
 
   useEffect(() => { loadPlans(); }, []);
@@ -179,6 +185,8 @@ export default function EventPlans() {
         <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-card">
           {itemsError ? (
             <ErrorState message={itemsError} onRetry={() => loadPlanItems(selectedId)} />
+          ) : itemsLoading ? (
+            <Spinner label="Loading plan structure..." className="py-12" />
           ) : (
             <>
               {planTree.length > 0 && (

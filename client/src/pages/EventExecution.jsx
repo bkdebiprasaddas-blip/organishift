@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Folder, FolderOpen, FileText, FolderPlus, MapPin, CheckSquare, Square, Pencil, Trash2
 } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import { useEventTitle } from '../context/EventTitleContext';
 import { useToast } from '../components/common/Toast';
 import TreeView from '../components/common/TreeView';
 import { Modal, ConfirmDialog, Spinner, ErrorState, Chip, STATUS_CHIP, PRIORITY_TEXT } from '../components/common';
@@ -32,31 +33,45 @@ export default function EventExecution() {
   const [addModal, setAddModal] = useState(null); // {parent}
   const [activeDrawerItem, setActiveDrawerItem] = useState(null);
   const [confirmDeleteEvent, setConfirmDeleteEvent] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [title, setTitle] = useState('');
   const [error, setError] = useState('');
 
   const toast = useToast();
   const isManager = role === 'MANAGER';
   const isAdminOrManager = role === 'ADMIN' || role === 'MANAGER';
+  const eventTitleCtx = useEventTitle();
+
+  const today = new Date();
+  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
 
   const load = useCallback(() => {
+    setError('');
     api.get(`/events/${id}`)
-      .then(setData)
+      .then(ev => {
+        setData(ev);
+        // CL-M4: publish title to context so Layout doesn't duplicate-fetch
+        if (ev.event?.title) eventTitleCtx.setTitle(id, ev.event.title);
+      })
       .catch(err => setError(err.message || 'Failed to load event'));
   }, [id]);
 
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
-    if (isAdminOrManager) api.get('/users').then(setUsers).catch(() => {});
+    if (isAdminOrManager) api.get('/users').then(setUsers).catch(err => toast(err.message || 'Failed to load users', 'error'));
   }, [isAdminOrManager]);
 
   const updateItem = async (item, patch) => {
     try {
       await api.put(`/events/items/${item._id}`, patch);
-      load();
       toast('Updated');
-    } catch (err) { toast(err.message || 'Update failed', 'error'); }
+    } catch (err) {
+      toast(err.message || 'Update failed', 'error');
+      throw err;
+    } finally {
+      load();
+    }
   };
 
   const addChild = async () => {
@@ -75,18 +90,43 @@ export default function EventExecution() {
   const { event, tree } = data;
   const prog = Math.round(event.progressPercent || 0);
 
+  // CL-M3: compute set of node IDs the current user owns (self or ancestor assigned)
+  // so child leaves in an owned branch are editable by MEMBERs.
+  const ownedNodeIds = useMemo(() => {
+    if (role !== 'MEMBER') return null;
+    const owned = new Set();
+    const walk = (nodes) => {
+      nodes.forEach(n => {
+        const isAssigned = String(n.assigneeId?._id ?? n.assigneeId) === String(user._id);
+        if (isAssigned) {
+          const addSubtree = (node) => {
+            owned.add(String(node._id));
+            (node.children || []).forEach(addSubtree);
+          };
+          addSubtree(n);
+        }
+        walk(n.children || []);
+      });
+    };
+    walk(tree);
+    return owned;
+  }, [tree, role, user._id]);
+
   const statusOptionsFor = item =>
     (TRANSITIONS[item.status] || []).filter(next =>
       item.status === 'COMPLETED' ? isAdminOrManager : true
     );
 
   const handleDeleteEvent = async () => {
+    setDeleting(true);
     try {
       await api.delete(`/events/${id}`);
       toast(`Event "${event.title}" deleted`);
       navigate('/execution');
     } catch (err) {
       toast(err.message || 'Failed to delete event', 'error');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -163,7 +203,7 @@ export default function EventExecution() {
               const options = statusOptionsFor(node);
               const canToggleStatus = !hasKids && (
                 role === 'MEMBER'
-                  ? String(node.assigneeId?._id ?? node.assigneeId) === String(user._id) && node.status !== 'COMPLETED'
+                  ? (ownedNodeIds ? ownedNodeIds.has(String(node._id)) : false) && node.status !== 'COMPLETED'
                   : true
               );
 
@@ -177,13 +217,19 @@ export default function EventExecution() {
                     <button
                       type="button"
                       disabled={!canToggleStatus}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (canToggleStatus) {
-                          const nextStatus = isCompleted ? 'IN_PROGRESS' : 'COMPLETED';
-                          updateItem(node, { status: nextStatus });
-                        }
-                      }}
+                       onClick={(e) => {
+                         e.stopPropagation();
+                         if (canToggleStatus) {
+                           const nextStatus = isCompleted ? 'IN_PROGRESS' : 'COMPLETED';
+                           // Auto-chain: NOT_STARTED/BLOCKED -> IN_PROGRESS -> COMPLETED
+                           if (nextStatus === 'COMPLETED' && (node.status === 'NOT_STARTED' || node.status === 'BLOCKED')) {
+                             updateItem(node, { status: 'IN_PROGRESS' })
+                               .then(() => updateItem(node, { status: 'COMPLETED' }));
+                           } else {
+                             updateItem(node, { status: nextStatus });
+                           }
+                         }
+                       }}
                       title={isCompleted ? "Mark in progress" : "Mark completed"}
                       className={`flex h-5 w-5 shrink-0 items-center justify-center rounded transition ${canToggleStatus ? 'cursor-pointer hover:bg-emerald-50' : 'cursor-not-allowed opacity-60'}`}
                     >
@@ -191,13 +237,14 @@ export default function EventExecution() {
                     </button>
                   )}
 
-                  <span
-                    onClick={(e) => { e.stopPropagation(); setActiveDrawerItem(node); }}
-                    title="Click to open task detail drawer"
-                    className={`text-xs transition-all cursor-pointer hover:text-indigo-600 hover:underline ${hasKids ? 'font-bold text-slate-900' : (isCompleted ? 'line-through text-slate-400 font-medium' : 'font-semibold text-slate-800')}`}
-                  >
-                    {node.title}
-                  </span>
+                   <button
+                     type="button"
+                     onClick={(e) => { e.stopPropagation(); setActiveDrawerItem(node); }}
+                     title="Click to open task detail drawer"
+                     className={`text-xs transition-all text-left hover:text-indigo-600 hover:underline ${hasKids ? 'font-bold text-slate-900' : (isCompleted ? 'line-through text-slate-400 font-medium' : 'font-semibold text-slate-800')}`}
+                   >
+                     {node.title}
+                   </button>
 
                   <Chip kind={node.status}>{label(node.status)}</Chip>
 
@@ -206,7 +253,7 @@ export default function EventExecution() {
                   )}
 
                   {node.dueDate && (() => {
-                    const overdue = new Date(node.dueDate) < new Date() && node.status !== 'COMPLETED';
+                    const overdue = new Date(node.dueDate) < startOfToday && node.status !== 'COMPLETED';
                     return (
                       <span className={`flex shrink-0 flex-wrap items-center gap-1 text-[10px] ${overdue ? 'font-semibold text-rose-600' : 'text-slate-500'}`}>
                         <span className="hidden sm:inline">due {new Date(node.dueDate).toLocaleDateString()}</span>
@@ -313,7 +360,7 @@ export default function EventExecution() {
             placeholder="Item title" aria-label="Child item title"
             className="w-full rounded-lg border border-slate-300 p-2.5 text-xs font-semibold" />
           <div className="mt-4 flex justify-end gap-2">
-            <button onClick={() => setAddModal(null)} className="min-h-[36px] px-3 text-xs font-semibold text-slate-600">Cancel</button>
+            <button onClick={() => { setAddModal(null); setTitle(''); }} className="min-h-[36px] px-3 text-xs font-semibold text-slate-600">Cancel</button>
             <button onClick={addChild} disabled={!title.trim()}
               className="min-h-[36px] rounded-lg bg-indigo-600 px-3.5 text-xs font-semibold text-white disabled:opacity-50">Add</button>
           </div>
@@ -323,13 +370,13 @@ export default function EventExecution() {
       {/* Confirm Delete Event Dialog */}
       {confirmDeleteEvent && (
         <ConfirmDialog
-          title={`Delete Event "${event.title}"?`}
-          message="Are you sure you want to delete this scheduled event? All execution items and progress data for this event will be permanently removed."
-          confirmLabel="Delete Event"
-          danger
-          onConfirm={handleDeleteEvent}
-          onCancel={() => setConfirmDeleteEvent(false)}
-        />
+           title={`Delete Event "${event.title}"?`}
+           message="Are you sure you want to delete this scheduled event? All execution items and progress data for this event will be permanently removed."
+           confirmLabel="Delete Event"
+           busy={deleting}
+           onConfirm={handleDeleteEvent}
+           onCancel={() => setConfirmDeleteEvent(false)}
+         />
       )}
 
       {/* Task Detail Slide-Over Side Drawer */}
@@ -338,8 +385,12 @@ export default function EventExecution() {
         onClose={() => setActiveDrawerItem(null)}
         item={activeDrawerItem}
         onUpdate={async (item, patch) => {
-          await updateItem(item, patch);
-          setActiveDrawerItem(prev => prev ? { ...prev, ...patch } : null);
+          try {
+            await updateItem(item, patch);
+            setActiveDrawerItem(prev => prev ? { ...prev, ...patch } : null);
+          } catch (err) {
+            throw err;
+          }
         }}
         users={users}
         currentUser={user}

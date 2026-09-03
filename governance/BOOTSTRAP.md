@@ -4,17 +4,17 @@
 > (PART I–III). Short pointer: `AGENTS.md`.
 
 ## Snapshot
-- **Phase:** TESTING COMPLETE + **UI/UX & Reusable Event Refinement Delivered** (2026-08-26).
-  All owner-requested features implemented & verified:
-  - "Planning Library" renamed to **"Reusable Event"** across routes, sidebar navigation, and header breadcrumbs.
-  - Reusable Event features added: Real-time Search bar with count badge, Statistics cards (Root Templates, Sub-items, Max Depth), Quick Pre-built Template Presets (Catering, Stage & AV, Guest Reception), JSON Export & Copy Text summary tools.
-  - Add Root Template, Add Folder, Add Sub-item, and Operational Notes/Description support integrated across tree items.
-  - Hover Action Toolbar redesign: Action buttons (`+ Folder`, `+ Task`, `Edit`, `Move`, `Delete`) positioned inline immediately after title text, strictly scoped to hovered item row (`group-hover/row`).
-  - Interactive Checklist Checkboxes added to Reusable Event and Event Execution pages (`Square` / `CheckSquare` with strikethrough styling and automatic progress recalculation).
-  - Item Detail Popup Modal: Click any item card to open popup editor with operational notes & sub-item tools.
+- **Phase:** TESTING complete → CODING resumed → **ALL MEDIUM + most LOW items fixed, 48/48 tests passing**.
+  - Full audit delivered 2026-08-31 (59 verified issues: 12 HIGH / 21 MEDIUM / 26 LOW).
+  - HIGH items: all 12 fixed + regression tested (2026-09-02 session).
+  - MEDIUM items: all 9 fixed + regression tested.
+  - LOW items: 18/26 fixed (CL-L1..L6,L10,L11,L12 + SV-L1..L14 except L12 deferred). Remaining: CL-L7 partial (client-side overdue check), CL-L8 (EventPlans tree flash — has itemsLoading state), CL-L9 (Schedule Event no-plans hint — done in CL-M7).
+  - Report: `governance/documentation/BUG_AND_IMPROVEMENT_REPORT.md` (continuity artifact — fix from it one item at a time).
+  - **No code changed in the audit session — app state identical to 2026-08-26.**
+  - **MEDIUM+LOW fixes applied 2026-09-02.**
 - **Stack decision:** MERN in **JavaScript**.
 - **Branch:** `v1`. Work is LOCAL + UNCOMMITTED (owner triggers commits).
-- **Verification (2026-08-26):** Server test suite **40/40 passed** (`node --test`); Client Vite production build clean (0 errors, built in 1.86s).
+- **Verification (2026-09-02):** 48/48 server tests pass (`npm test`); client Vite build clean (1656 modules, 0 errors).
 
 ## Product (Phase 1)
 - Routes: `/login /dashboard /planning-library /event-plans /calendar /execution /events/:id` (+ builder addressable via `/event-plans?plan=<id>`).
