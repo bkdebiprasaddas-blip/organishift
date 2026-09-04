@@ -267,9 +267,12 @@ export default function EventExecution() {
             }}
             renderActions={(node, { hasKids }) => {
               const options = statusOptionsFor(node);
+              // CL-M3 parity: same owned-branch check as the row checkbox (canToggleStatus),
+              // not just direct assignment — a MEMBER who owns an ancestor folder must get
+              // the same status options here as the checkbox already grants them.
               const canEditStatus = !hasKids && (
                 role === 'MEMBER'
-                  ? String(node.assigneeId?._id ?? node.assigneeId) === String(user._id) && node.status !== 'COMPLETED'
+                  ? (ownedNodeIds ? ownedNodeIds.has(String(node._id)) : false) && node.status !== 'COMPLETED'
                   : true
               );
               return (

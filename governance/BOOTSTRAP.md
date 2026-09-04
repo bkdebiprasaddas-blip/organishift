@@ -4,17 +4,19 @@
 > (PART I–III). Short pointer: `AGENTS.md`.
 
 ## Snapshot
-- **Phase:** TESTING complete → CODING resumed → **ALL MEDIUM + most LOW items fixed, 48/48 tests passing**.
+- **Phase:** CODING → TESTING → **ALL 7 BC-1..BC-7 items fixed and verified (code + route-level + 48/48 tests + clean build).**
   - Full audit delivered 2026-08-31 (59 verified issues: 12 HIGH / 21 MEDIUM / 26 LOW).
   - HIGH items: all 12 fixed + regression tested (2026-09-02 session).
   - MEDIUM items: all 9 fixed + regression tested.
-  - LOW items: 18/26 fixed (CL-L1..L6,L10,L11,L12 + SV-L1..L14 except L12 deferred). Remaining: CL-L7 partial (client-side overdue check), CL-L8 (EventPlans tree flash — has itemsLoading state), CL-L9 (Schedule Event no-plans hint — done in CL-M7).
+  - LOW items: all 26 fixed + regression tested (CL-L1..L12 + SV-L1..L14). SV-L12 deferred (no rate limiting — acceptable MVP limitation). CL-L7 (overdue badge) — fixed: both server (`dashboardController.js:27-28`) and client (`EventExecution.jsx:46,256`) use `startOfToday` for consistent end-of-day comparison.
   - Report: `governance/documentation/BUG_AND_IMPROVEMENT_REPORT.md` (continuity artifact — fix from it one item at a time).
   - **No code changed in the audit session — app state identical to 2026-08-26.**
   - **MEDIUM+LOW fixes applied 2026-09-02.**
+  - **2026-09-04 session:** fresh line-by-line re-review of every server + client file found 7 new issues not in the 08-31 audit — logged and fixed in `governance/documentation/BUG_CHECKLIST_2026-09-04.md` (BC-1..BC-7). Notably BC-1 was a regression the 2026-09-02 session itself introduced while fixing CL-M5 (TaskDetailDrawer's Escape/focus-trap/scroll-lock effect had a `[]` dep array that never re-ran because the drawer is always-mounted, not conditionally mounted — fixed to `[isOpen]`).
+  - **2026-09-04 verification:** BC-4 + BC-5 route-verified via curl (`PUT /api/event-items/:id` → 404; `GET /events/:id/progress` → 401); all 7 code-verified; 48/48 server tests pass; client build clean (1656 modules, 0 errors). Client lint not runnable (no eslint config + not a devDependency — flagged as project gap, not regression).
 - **Stack decision:** MERN in **JavaScript**.
-- **Branch:** `v1`. Work is LOCAL + UNCOMMITTED (owner triggers commits).
-- **Verification (2026-09-02):** 48/48 server tests pass (`npm test`); client Vite build clean (1656 modules, 0 errors).
+- **Branch:** `v1` (solo project; direct commits to `v1` after user approval).
+- **Verification (2026-09-04):** 48/48 server tests pass (`npm test`); client Vite build clean (1656 modules, 0 errors); client lint NOT verifiable (eslint not configured in this project).
 
 ## Product (Phase 1)
 - Routes: `/login /dashboard /planning-library /event-plans /calendar /execution /events/:id` (+ builder addressable via `/event-plans?plan=<id>`).
@@ -27,4 +29,4 @@
 - Demo logins (seeded, local-only): `admin@organishift.dev`, `manager@organishift.dev`, `member1@organishift.dev`, `member2@organishift.dev` / `Password123!`.
 
 ## Gates (RULEBOOK §F)
-DISCOVERY ✅ · PLANNING ✅ · DESIGN ✅ · UI ✅ · CODING ✅ · TESTING ✅ (40/40 tests + clean build) · RELEASE ⬜ (Local/College scope).
+DISCOVERY ✅ · PLANNING ✅ · DESIGN ✅ · UI ✅ · CODING ✅ · TESTING ✅ (48/48 tests + clean build + all 7 BC items verified) · RELEASE ⬜ (Local/College scope).

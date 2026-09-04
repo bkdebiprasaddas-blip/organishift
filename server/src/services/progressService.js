@@ -5,18 +5,22 @@ const scopeItemsForMember = require('../utils/scopeItemsForMember');
 
 class ProgressService {
   /**
-   * Recalculates progress percentages for all nodes in an event execution tree,
-   * updates the event progressPercent, and persists changes to MongoDB.
+   * Recalculates progress percentages for all nodes in an event execution tree.
+   * By default also persists the result to MongoDB (Event + every EventItem).
    * @param {string} eventId
    * @param {object|null} session - mongoose session for transactions
    * @param {object|null} user - requesting user; if MEMBER, returned tree is scoped
+   * @param {object} opts - { persist = true }. BC-5: the plain GET progress route
+   *   passes persist:false so a read has no side effects — only mutating
+   *   endpoints (add/update/delete item, schedule) should actually write.
    */
-  async recalculate(eventId, session = null, user = null) {
+  async recalculate(eventId, session = null, user = null, opts = {}) {
+    const { persist = true } = opts;
     const sopt = session ? { session } : {};
     const items = await EventItem.find({ eventId }, null, sopt);
     if (!items || items.length === 0) {
-      await Event.findByIdAndUpdate(eventId, { progressPercent: 0 }, sopt);
-      return { eventProgress: 0, items: [] };
+      if (persist) await Event.findByIdAndUpdate(eventId, { progressPercent: 0 }, sopt);
+      return { eventProgress: 0, tree: [] };
     }
 
     const itemMap = new Map();
@@ -69,20 +73,36 @@ class ProgressService {
       eventProgress = Math.round(rootSum / rootNodes.length);
     }
 
-    // Persist rounded progressPercent on each item
+    // Compute rounded progressPercent per item (always, in-memory)
+    const progressById = new Map();
     for (const item of items) {
       visited.clear(); // fresh traversal per item
-      const nodeProg = Math.round(calculateNodeProgress(item._id));
-      item.progressPercent = nodeProg;
-      await item.save(sopt);
+      progressById.set(String(item._id), Math.round(calculateNodeProgress(item._id)));
     }
 
-    // Persist event overall progress
-    await Event.findByIdAndUpdate(eventId, { progressPercent: eventProgress }, sopt);
+    let refreshedItems;
+    if (persist) {
+      // BC-5: only write to MongoDB when the caller is a mutating operation
+      // (schedule / add / update / delete item) — not a plain progress read.
+      for (const item of items) {
+        item.progressPercent = progressById.get(String(item._id));
+        await item.save(sopt);
+      }
+      await Event.findByIdAndUpdate(eventId, { progressPercent: eventProgress }, sopt);
 
-    let refreshedItems = await EventItem.find({ eventId }, null, sopt)
-      .populate('assigneeId', 'name role')
-      .sort({ level: 1, order: 1 });
+      refreshedItems = await EventItem.find({ eventId }, null, sopt)
+        .populate('assigneeId', 'name role')
+        .sort({ level: 1, order: 1 });
+    } else {
+      refreshedItems = await EventItem.find({ eventId }, null, sopt)
+        .populate('assigneeId', 'name role')
+        .sort({ level: 1, order: 1 });
+      // Decorate the in-memory docs with the freshly computed values without saving.
+      refreshedItems.forEach(i => {
+        const p = progressById.get(String(i._id));
+        if (p !== undefined) i.progressPercent = p;
+      });
+    }
 
     // SV-H4: scope the returned tree for MEMBERs (§2.7)
     if (user && user.role === 'MEMBER') {

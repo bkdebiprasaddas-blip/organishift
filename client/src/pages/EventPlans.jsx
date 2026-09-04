@@ -218,7 +218,7 @@ export default function EventPlans() {
                   rowClassName={() => 'bg-slate-50 hover:bg-indigo-50/50'}
                   renderMain={(node, { hasKids }) => {
                     const isCol = !!collapsed[node._id];
-                    const isLib = node.source === 'LIBRARY';
+                    const isLib = !!node.sourceLibraryItemId;
                     return (
                       <div className="flex flex-wrap items-center gap-2 min-w-0 flex-1">
                         {hasKids

@@ -649,10 +649,12 @@ export default function PlanningLibrary() {
           title={`Delete "${confirm.node.title}"?`}
           message={
             <>
-              This permanently removes <b>{confirm.total} item{confirm.total === 1 ? '' : 's'}</b> including all descendants:
+              This permanently removes <b>{confirm.total} item{confirm.total === 1 ? '' : 's'}</b> in total (including all nested descendants). Direct children:
               <ul className="mt-1.5 list-inside list-disc">
                 {confirm.node.children.slice(0, 5).map(c => <li key={c._id}>{c.title}</li>)}
-                {confirm.total > 6 && <li>…and {confirm.total - 6} more</li>}
+                {confirm.node.children.length > 5 && (
+                  <li>…and {confirm.node.children.length - 5} more direct item{confirm.node.children.length - 5 === 1 ? '' : 's'}</li>
+                )}
               </ul>
             </>
           }

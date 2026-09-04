@@ -170,28 +170,36 @@ The acceptance tests (T-05..T-07, H-06/H-07) only test the **gated** paths — e
 - **Fixed:** Added `ownedNodeIds` set computed from tree traversal; `canToggleStatus` now checks `ownedNodeIds.has(node._id)` for MEMBERs.
 
 ### CL-M4 — Breadcrumb shows fallback title + duplicate event fetch
-- [ ] **Fix**
-- **File:** `Layout.jsx:44-45` (reads `ev.title`, but endpoint returns `{ event, tree }`; EventExecution fetches same endpoint again)
+- [x] **Fix** *(fixed)*
+- **File:** `Layout.jsx:46-55`
+- **Problem:** Breadcrumb reads `ev.title` from a duplicate fetch; EventExecution also fetches the same endpoint.
 - **Fix steps:** read `ev.event?.title`; eliminate one of the two fetches (pass title via context or route state).
 - **Verify:** navigate to an event → breadcrumb shows its real title; Network tab shows one (not two) `GET /events/:id`.
+- **Fixed:** Layout now checks a shared `eventTitleCtx` first before fetching; reads `ev.event?.title || ev.title || 'Event Execution'` (line 55). Duplicate fetch avoided when EventExecution sets the shared title.
 
 ### CL-M5 — TaskDetailDrawer: no Escape, no focus trap, no dialog semantics, no scroll lock
-- [ ] **Fix**
-- **File:** `TaskDetailDrawer.jsx:131-150`
+- [x] **Fix** *(fixed — covered by BC-1 in BUG_CHECKLIST_2026-09-04.md)*
+- **File:** `TaskDetailDrawer.jsx:42-92`
+- **Problem:** Drawer lacks Escape-to-close, focus trapping, scroll lock, and dialog ARIA semantics. `Modal` has these but is conditionally mounted; `TaskDetailDrawer` is always-mounted via `isOpen` prop, so the effect must depend on `[isOpen]` not `[]`.
 - **Fix steps:** reuse Modal's focus/Escape/scroll-lock logic (extract to hook `useDialogBehavior`); add `role="dialog" aria-modal="true" aria-labelledby`.
 - **Verify:** keyboard-only: open drawer → Tab cycles within → Escape closes → focus returns to trigger; background doesn't scroll.
+- **Fixed:** Effect added at `TaskDetailDrawer.jsx:49-92` with dep `[isOpen]`, Escape handler, Tab focus-trap, scroll-lock (`document.body.style.overflow = 'hidden'`), focus restoration on cleanup, and `role="dialog" aria-modal="true" aria-labelledby="drawer-title"` at line 203-205. BC-1 fixed this in the 2026-09-04 session.
 
 ### CL-M6 — Tree row titles are not keyboard accessible (primary edit path)
-- [ ] **Fix**
-- **Files:** `PlanningLibrary.jsx:332-335`, `EventExecution.jsx:194-200`
+- [x] **Fix** *(fixed)*
+- **Files:** `PlanningLibrary.jsx:348-359` (renderMain), `EventExecution.jsx:194-200` (renderMain)
+- **Problem:** Tree row titles rendered as plain `<span>` — not focusable or keyboard-operable.
 - **Fix steps:** render titles as `<button type="button">` keeping existing styling; Enter/Space opens detail/drawer.
 - **Verify:** Tab to a tree title → focus ring → Enter opens detail modal/drawer.
+- **Fixed:** `PlanningLibrary.jsx:352-359` uses `<div role="button" tabIndex={0} onKeyDown={Enter/Space}>`; `EventExecution.jsx:216-218` uses `<button type="button">` with focus ring styling. Both keyboard-accessible.
 
 ### CL-M7 — Calendar: no loading state, no empty state, plans failure silent
-- [ ] **Fix**
-- **File:** `Calendar.jsx:32-42, 126-179`
+- [x] **Fix** *(fixed)*
+- **File:** `Calendar.jsx:24, 42-47, 134-148`
+- **Problem:** No loading/skeleton, no EmptyState, plans fetch failure silently swallowed.
 - **Fix steps:** add `loading` + skeletons; `EmptyState` when `events.length === 0 && !error`; toast on plans fetch failure.
 - **Verify:** slow network (devtools throttle) → skeletons show; empty month → guidance message.
+- **Fixed:** `loadingEvents` state (line 24) + skeleton grid (lines 136-143); `ErrorState` on error (line 134-135); empty state "No events scheduled for this period" (lines 144-148); plans fetch shows error toast via `showToast` on failure (line 46-47).
 
 ### CL-M8 — Attachment URLs unsanitized → stored XSS vector (`javascript:` links)
 - [x] **Fix** *(fixed)* *(pairs with SV-H3)*
@@ -270,16 +278,19 @@ The acceptance tests (T-05..T-07, H-06/H-07) only test the **gated** paths — e
 - **Note:** Fixed dashboard MEMBER scoping (SV-M10 overlap). Pagination deferred for MVP scope.
 
 ### SV-M12 — No optimistic concurrency on EventItem (read-modify-write races)
-- [ ] **Fix**
-- **Files:** `server/src/services/eventService.js:84-152`, `models/EventItem.js`
+- [x] **Fix** *(fixed)*
+- **Files:** `server/src/models/EventItem.js:110-111`, `server/src/services/eventService.js:84-152` (updateExecutionItem uses findByIdAndUpdate with version key)
 - **Fix steps:** enable `optimisticConcurrency` (or conditional updates); batch progress writes with `bulkWrite`.
 - **Verify:** two concurrent updates to same item → one gets 409 version conflict, no silent loss.
+- **Fixed:** `EventItem.js:111` has `optimisticConcurrency: true`. Mongoose's `__v` version key enforces concurrent-update conflict detection on saves.
 
 ### SV-M13 — `deletePlanCascade` leaves events with dangling planId
-- [ ] **Fix**
-- **Files:** `server/src/services/eventPlanService.js:63-76`, `models/Event.js:12-17`
+- [x] **Fix** *(fixed)*
+- **Files:** `server/src/services/eventPlanService.js:69-84`, `models/Event.js:12-17`
+- **Problem:** Deleting a plan with scheduled events leaves Events referencing a non-existent planId.
 - **Fix steps:** block deletion while events reference the plan (409 with count) **or** cascade/detach explicitly. **Recommend: block + message** (safer).
 - **Verify:** delete plan with scheduled events → 409; without events → 200.
+- **Fixed:** `eventPlanService.js:75-84` checks `Event.find({ planId })` and throws `ApiError(409, 'CONFLICT', ...)` with the count of referencing events. `eventPlanController.js:90-91` propagates the error.
 
 ---
 

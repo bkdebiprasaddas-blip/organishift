@@ -45,7 +45,6 @@ app.use('/api/users', userRoutes);
 app.use('/api/planning-items', planningRoutes);
 app.use('/api/event-plans', eventPlanRoutes);
 app.use('/api/events', eventRoutes);
-app.use('/api/event-items', eventRoutes); // Alternate mount for PUT/DELETE /api/event-items/:id
 app.use('/api/dashboard', dashboardRoutes);
 
 // 404 Handler

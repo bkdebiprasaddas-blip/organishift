@@ -39,7 +39,13 @@ const [saveError, setSaveError] = useState('');
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 
-  // CL-M5: Escape close + focus trap + scroll lock + dialog semantics
+  // CL-M5 / BC-1: Escape close + focus trap + scroll lock + dialog semantics.
+  // Deps on [isOpen] only (not [] and not [item]): this component is always
+  // mounted by the parent with isOpen toggling, so [] would only ever fire once
+  // (on initial mount, while isOpen is still false) and never again on real
+  // opens/closes. Including `item` would also re-run this on every autosave
+  // while the drawer stays open (item is replaced on each field save), yanking
+  // focus back to the first field — the same bug this effect exists to avoid.
   useEffect(() => {
     if (!isOpen || !item) return undefined;
 
@@ -83,7 +89,7 @@ const [saveError, setSaveError] = useState('');
         previouslyFocused.focus();
       }
     };
-  }, []);
+  }, [isOpen]);
 
   useEffect(() => {
     if (item) {

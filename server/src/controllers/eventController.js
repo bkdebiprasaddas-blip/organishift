@@ -187,7 +187,9 @@ const deleteEvent = asyncHandler(async (req, res) => {
 });
 
 const getEventProgress = asyncHandler(async (req, res) => {
-  const result = await progressService.recalculate(req.params.id, null, req.user);
+  // BC-5: this is a read — compute and return current progress without
+  // triggering a full write of Event + every EventItem on every GET.
+  const result = await progressService.recalculate(req.params.id, null, req.user, { persist: false });
   return res.status(200).json({
     success: true,
     data: result,

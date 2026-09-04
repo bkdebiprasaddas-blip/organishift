@@ -241,7 +241,7 @@ export default function Calendar() {
             </select>
             <input value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} placeholder="Event title" aria-label="Event title" className="w-full rounded-lg border border-slate-300 p-2 text-xs font-semibold" />
             <div className="grid grid-cols-2 gap-3">
-              <input type="date" value={form.startDate} onChange={e => setForm(f => ({ ...f, startDate: e.target.value }))} aria-label="Start date" className="rounded-lg border border-slate-300 p-2 text-xs font-semibold" />
+              <input type="date" value={form.startDate} min={new Date().toISOString().slice(0, 10)} onChange={e => setForm(f => ({ ...f, startDate: e.target.value }))} aria-label="Start date" className="rounded-lg border border-slate-300 p-2 text-xs font-semibold" />
               <input type="date" value={form.endDate} min={form.startDate} onChange={e => setForm(f => ({ ...f, endDate: e.target.value }))} placeholder="End (optional)" aria-label="End date (optional)" className="rounded-lg border border-slate-300 p-2 text-xs font-semibold" />
             </div>
             <input value={form.venue} onChange={e => setForm(f => ({ ...f, venue: e.target.value }))} placeholder="Venue (optional)" aria-label="Venue (optional)" className="w-full rounded-lg border border-slate-300 p-2 text-xs font-semibold" />
