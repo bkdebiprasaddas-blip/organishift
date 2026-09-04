@@ -10,6 +10,6 @@ router.get('/', requireRole('ADMIN', 'MANAGER'), userController.getUsers);
 router.post('/', requireRole('ADMIN'), userController.createUser);
 router.get('/:id', requireRole('ADMIN'), userController.getUserById);
 router.put('/:id', requireRole('ADMIN'), userController.updateUser);
-router.delete('/:id', requireRole('ADMIN'), userController.deleteUser);
+router.delete('/:id', requireRole('ADMIN'), userController.deactivateUser);
 
 module.exports = router;

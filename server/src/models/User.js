@@ -55,7 +55,9 @@ userSchema.pre('save', async function (next) {
   }
 });
 
-// Password comparison method
+// Password comparison method. Note: authController.login does NOT call this —
+// it calls bcrypt.compare directly against a dummy hash for unknown users
+// (SV-L8 timing-safety). This method exists for direct model use/tests.
 userSchema.methods.comparePassword = async function (candidatePassword) {
   return bcrypt.compare(candidatePassword, this.passwordHash);
 };

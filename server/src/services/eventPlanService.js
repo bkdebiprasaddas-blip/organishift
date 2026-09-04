@@ -1,9 +1,25 @@
+const Event = require('../models/Event');
 const EventPlan = require('../models/EventPlan');
 const PlanningItem = require('../models/PlanningItem');
 const ApiError = require('../utils/ApiError');
 const withTx = require('../utils/withTx');
 
 class EventPlanService {
+  async updatePlan(planId, patch) {
+    const plan = await EventPlan.findById(planId);
+    if (!plan) {
+      throw new ApiError(404, 'PLAN_NOT_FOUND', 'Event plan not found');
+    }
+
+    if (patch.title !== undefined) plan.title = patch.title;
+    if (patch.description !== undefined) plan.description = patch.description;
+    if (patch.category !== undefined) plan.category = patch.category;
+    if (patch.isTemplate !== undefined) plan.isTemplate = patch.isTemplate;
+
+    await plan.save();
+    return plan;
+  }
+
   async copyFromLibrary(planId, libraryItemId, userId) {
     const plan = await EventPlan.findById(planId);
     if (!plan) {
@@ -73,7 +89,6 @@ class EventPlanService {
     }
 
     // SV-M13: prevent deletion when events reference this plan (dangling planId)
-    const Event = require('../models/Event');
     const referencingEvents = await Event.find({ planId }).select('_id');
     if (referencingEvents.length > 0) {
       throw new ApiError(

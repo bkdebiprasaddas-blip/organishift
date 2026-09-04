@@ -68,18 +68,7 @@ const getPlanById = asyncHandler(async (req, res) => {
 
 const updatePlan = asyncHandler(async (req, res) => {
   const parsed = updatePlanSchema.parse(req.body);
-  const plan = await EventPlan.findById(req.params.id);
-  if (!plan) {
-    throw new ApiError(404, 'PLAN_NOT_FOUND', 'Event plan not found');
-  }
-
-  if (parsed.title !== undefined) plan.title = parsed.title;
-  if (parsed.description !== undefined) plan.description = parsed.description;
-  if (parsed.category !== undefined) plan.category = parsed.category;
-  if (parsed.isTemplate !== undefined) plan.isTemplate = parsed.isTemplate;
-
-  await plan.save();
-
+  const plan = await eventPlanService.updatePlan(req.params.id, parsed);
   return res.status(200).json({
     success: true,
     data: plan,

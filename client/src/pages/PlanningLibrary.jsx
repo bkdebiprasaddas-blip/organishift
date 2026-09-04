@@ -152,9 +152,13 @@ export default function PlanningLibrary() {
     setCollapsed(next);
   };
 
-  const flatNodes = [];
-  const walkFlat = (nodes, depth) => nodes.forEach(n => { flatNodes.push({ ...n, depth }); walkFlat(n.children, depth + 1); });
-  walkFlat(tree, 0);
+  // Feeds a render-time <select> below — memoized so it only rebuilds when tree changes.
+  const flatNodes = useMemo(() => {
+    const result = [];
+    const walkFlat = (nodes, depth) => nodes.forEach(n => { result.push({ ...n, depth }); walkFlat(n.children, depth + 1); });
+    walkFlat(tree, 0);
+    return result;
+  }, [tree]);
 
   // Statistics calculation
   const stats = useMemo(() => {

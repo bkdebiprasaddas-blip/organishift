@@ -6,6 +6,8 @@ import {
 import { Chip, STATUS_CHIP, PRIORITY_TEXT } from './chips';
 import { useToast } from './Toast';
 
+const VALID_URL_SCHEME = /^https?:\/\//i;
+
 export default function TaskDetailDrawer({
   isOpen,
   onClose,
@@ -13,9 +15,7 @@ export default function TaskDetailDrawer({
   onUpdate,
   users = [],
   currentUser,
-  isManager,
-  isAdminOrManager,
-  role
+  isManager
 }) {
   const [activeTab, setActiveTab] = useState('details'); // details | checklist | notes | comments | attachments
   const [title, setTitle] = useState('');
@@ -171,8 +171,6 @@ const [saveError, setSaveError] = useState('');
     setNewComment('');
     handleSaveField({ comments: updated });
   };
-
-  const VALID_URL_SCHEME = /^https?:\/\//i;
 
   const addAttachmentRow = () => {
     const name = newAttachmentName.trim();

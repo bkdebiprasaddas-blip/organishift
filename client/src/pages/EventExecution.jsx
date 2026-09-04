@@ -12,6 +12,9 @@ import { Modal, ConfirmDialog, Spinner, ErrorState, Chip, STATUS_CHIP, PRIORITY_
 import TaskDetailDrawer from '../components/common/TaskDetailDrawer';
 import { relativeDate } from '../utils/dates';
 
+// Mirrors server/src/utils/statusTransitions.js (STATUS_TRANSITIONS) — keep
+// both in sync if the state machine changes. Server is the authoritative
+// enforcement; this copy only drives which options the UI offers.
 const TRANSITIONS = {
   NOT_STARTED: ['IN_PROGRESS', 'BLOCKED'],
   IN_PROGRESS: ['COMPLETED', 'BLOCKED'],
@@ -398,8 +401,6 @@ export default function EventExecution() {
         users={users}
         currentUser={user}
         isManager={isManager}
-        isAdminOrManager={isAdminOrManager}
-        role={role}
       />
     </div>
   );

@@ -77,6 +77,24 @@ class PlanningService {
     return item;
   }
 
+  async updateItem(id, patch) {
+    const item = await PlanningItem.findById(id);
+    if (!item) {
+      throw new ApiError(404, 'NOT_FOUND', 'Planning item not found');
+    }
+
+    if (patch.title !== undefined) item.title = patch.title;
+    if (patch.description !== undefined) item.description = patch.description;
+    if (patch.nodeType !== undefined) item.nodeType = patch.nodeType;
+    if (patch.operationalNotes !== undefined) item.operationalNotes = patch.operationalNotes;
+    if (patch.tags !== undefined) item.tags = patch.tags;
+    if (patch.checklist !== undefined) item.checklist = patch.checklist;
+    if (patch.order !== undefined) item.order = patch.order;
+
+    await item.save();
+    return item;
+  }
+
   async moveItem(id, newParentId) {
     if (String(id) === String(newParentId)) {
       throw new ApiError(400, 'CYCLE_DETECTED', 'Cannot move an item under itself');

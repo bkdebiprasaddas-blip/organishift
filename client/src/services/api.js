@@ -19,7 +19,10 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Response interceptor: unwrap envelope, handle errors, redirect on 401
+// Response interceptor: unwrap envelope, handle errors, redirect on 401.
+// Intentionally drops the envelope's `message` on success — every caller
+// writes its own toast copy (often more specific than the generic server
+// message, e.g. `Event "${event.title}" deleted`), so there's nothing to wire up.
 api.interceptors.response.use(
   (response) => {
     return response.data.data;

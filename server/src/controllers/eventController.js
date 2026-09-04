@@ -8,6 +8,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const buildTree = require('../utils/buildTree');
 const scopeItemsForMember = require('../utils/scopeItemsForMember');
 const withTx = require('../utils/withTx');
+const VALID_URL_SCHEME = require('../utils/urlScheme');
 
 const scheduleEventSchema = z.object({
   title: z.string().min(3).max(120),
@@ -39,8 +40,6 @@ const addExecutionItemSchema = z.object({
     .nullable()
     .optional()
 });
-
-const VALID_URL_SCHEME = /^https?:\/\//i;
 
 const updateExecutionItemSchema = z.object({
   title: z.string().min(1).max(120).optional(),
@@ -199,52 +198,7 @@ const getEventProgress = asyncHandler(async (req, res) => {
 
 const addExecutionItem = asyncHandler(async (req, res) => {
   const parsed = addExecutionItemSchema.parse(req.body);
-  const { eventId } = req.params;
-  const { title, parentId, priority, dueDate } = parsed;
-
-  const event = await Event.findById(eventId);
-  if (!event) {
-    throw new ApiError(404, 'NOT_FOUND', 'Event not found');
-  }
-
-  let level = 0;
-  let parentPath = ',';
-
-  if (parentId) {
-    const parent = await EventItem.findById(parentId);
-    if (!parent) {
-      throw new ApiError(404, 'NOT_FOUND', 'Parent execution item not found');
-    }
-    // SV-M3: parent must belong to the same event
-    if (String(parent.eventId) !== String(eventId)) {
-      throw new ApiError(409, 'VALIDATION_ERROR', 'Parent item does not belong to this event');
-    }
-    level = parent.level + 1;
-    parentPath = parent.path;
-  }
-
-  // SV-M3: compute order as max sibling order + 1
-  const lastSibling = await EventItem.findOne({ eventId, parentId: parentId || null }).sort({ order: -1 });
-  const order = lastSibling ? lastSibling.order + 1 : 0;
-
-  const eItem = new EventItem({
-    eventId,
-    parentId: parentId || null,
-    title,
-    path: ',',
-    level,
-    order,
-    priority: priority || 'MEDIUM',
-    dueDate: dueDate ? new Date(dueDate) : event.startDate,
-    status: 'NOT_STARTED',
-    progressPercent: 0
-  });
-
-  eItem.path = `${parentPath}${eItem._id},`;
-  await eItem.save();
-
-  await progressService.recalculate(eventId);
-
+  const eItem = await eventService.addExecutionItem(req.params.eventId, parsed);
   return res.status(201).json({
     success: true,
     data: eItem,

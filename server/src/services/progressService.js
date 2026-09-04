@@ -38,10 +38,14 @@ class ProgressService {
     const rootNodes = items.filter(i => i.parentId === null);
     let eventProgress = 0;
 
-    // SV-L11: visited-set guard to prevent stack overflow on corrupted cycles
+    // SV-L11: visited-set guard to prevent stack overflow on corrupted cycles.
+    // memo caches each node's fully-resolved progress so the root-level pass
+    // and the per-item pass below don't redo overlapping subtree work.
     const visited = new Set();
+    const memo = new Map();
     const calculateNodeProgress = (nodeId) => {
       const key = String(nodeId);
+      if (memo.has(key)) return memo.get(key);
       if (visited.has(key)) return 0; // cycle guard
       visited.add(key);
 
@@ -49,38 +53,38 @@ class ProgressService {
       if (!node) return 0;
       const children = childrenMap.get(key) || [];
 
+      let result;
       if (children.length === 0) {
         // Leaf node calculation
-        if (node.status === 'COMPLETED') return 100;
-        if (node.status === 'IN_PROGRESS') return 50;
-        return 0; // NOT_STARTED or BLOCKED
+        if (node.status === 'COMPLETED') result = 100;
+        else if (node.status === 'IN_PROGRESS') result = 50;
+        else result = 0; // NOT_STARTED or BLOCKED
+      } else {
+        // Parent node calculation: average of immediate children
+        const childrenProgressSum = children.reduce((sum, child) => {
+          return sum + calculateNodeProgress(child._id);
+        }, 0);
+        result = childrenProgressSum / children.length;
       }
 
-      // Parent node calculation: average of immediate children
-      const childrenProgressSum = children.reduce((sum, child) => {
-        return sum + calculateNodeProgress(child._id);
-      }, 0);
-
-      const avg = childrenProgressSum / children.length;
-      return avg;
+      memo.set(key, result);
+      return result;
     };
 
     if (rootNodes.length > 0) {
-      visited.clear(); // reset for root-level traversal
       const rootSum = rootNodes.reduce((sum, root) => {
         return sum + calculateNodeProgress(root._id);
       }, 0);
       eventProgress = Math.round(rootSum / rootNodes.length);
     }
 
-    // Compute rounded progressPercent per item (always, in-memory)
+    // Compute rounded progressPercent per item (memoized above, so items
+    // already reached during the root-level pass are O(1) here).
     const progressById = new Map();
     for (const item of items) {
-      visited.clear(); // fresh traversal per item
       progressById.set(String(item._id), Math.round(calculateNodeProgress(item._id)));
     }
 
-    let refreshedItems;
     if (persist) {
       // BC-5: only write to MongoDB when the caller is a mutating operation
       // (schedule / add / update / delete item) — not a plain progress read.
@@ -89,14 +93,13 @@ class ProgressService {
         await item.save(sopt);
       }
       await Event.findByIdAndUpdate(eventId, { progressPercent: eventProgress }, sopt);
+    }
 
-      refreshedItems = await EventItem.find({ eventId }, null, sopt)
-        .populate('assigneeId', 'name role')
-        .sort({ level: 1, order: 1 });
-    } else {
-      refreshedItems = await EventItem.find({ eventId }, null, sopt)
-        .populate('assigneeId', 'name role')
-        .sort({ level: 1, order: 1 });
+    let refreshedItems = await EventItem.find({ eventId }, null, sopt)
+      .populate('assigneeId', 'name role')
+      .sort({ level: 1, order: 1 });
+
+    if (!persist) {
       // Decorate the in-memory docs with the freshly computed values without saving.
       refreshedItems.forEach(i => {
         const p = progressById.get(String(i._id));

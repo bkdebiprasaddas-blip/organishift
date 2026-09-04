@@ -2,6 +2,7 @@ const EventItem = require('../models/EventItem');
 const Event = require('../models/Event');
 const asyncHandler = require('../utils/asyncHandler');
 const scopeItemsForMember = require('../utils/scopeItemsForMember');
+const { getAllowedTransitions } = require('../utils/statusTransitions');
 
 const getDashboardStats = asyncHandler(async (req, res) => {
   const user = req.user;
@@ -46,12 +47,6 @@ const getDashboardStats = asyncHandler(async (req, res) => {
 
   // My Assigned Work — leaves assigned directly to the caller (any role), with
   // the allowed status transitions for inline editing (T-031 / UI-SPEC §6)
-  const TRANSITIONS = {
-    NOT_STARTED: ['IN_PROGRESS', 'BLOCKED'],
-    IN_PROGRESS: ['COMPLETED', 'BLOCKED'],
-    BLOCKED: ['IN_PROGRESS'],
-    COMPLETED: (user.role === 'MEMBER' ? [] : ['IN_PROGRESS'])
-  };
   const userStr = String(user._id);
   const myWork = leaves
     .filter(i => String(i.assigneeId?._id) === userStr)
@@ -67,7 +62,7 @@ const getDashboardStats = asyncHandler(async (req, res) => {
         isOverdue: Boolean(i.dueDate && new Date(i.dueDate) < startOfToday && i.status !== 'COMPLETED'),
         eventId: i.eventId,
         eventTitle: ev ? ev.title : '',
-        allowedTransitions: TRANSITIONS[i.status] || []
+        allowedTransitions: getAllowedTransitions(i.status, user.role)
       };
     });
 

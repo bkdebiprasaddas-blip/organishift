@@ -66,21 +66,7 @@ const getItemById = asyncHandler(async (req, res) => {
 
 const updateItem = asyncHandler(async (req, res) => {
   const parsed = updateItemSchema.parse(req.body);
-  const item = await PlanningItem.findById(req.params.id);
-  if (!item) {
-    throw new ApiError(404, 'NOT_FOUND', 'Planning item not found');
-  }
-
-  if (parsed.title !== undefined) item.title = parsed.title;
-  if (parsed.description !== undefined) item.description = parsed.description;
-  if (parsed.nodeType !== undefined) item.nodeType = parsed.nodeType;
-  if (parsed.operationalNotes !== undefined) item.operationalNotes = parsed.operationalNotes;
-  if (parsed.tags !== undefined) item.tags = parsed.tags;
-  if (parsed.checklist !== undefined) item.checklist = parsed.checklist;
-  if (parsed.order !== undefined) item.order = parsed.order;
-
-  await item.save();
-
+  const item = await planningService.updateItem(req.params.id, parsed);
   return res.status(200).json({
     success: true,
     data: item,

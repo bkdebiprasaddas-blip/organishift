@@ -3,10 +3,13 @@ const Event = require('../models/Event');
 const EventItem = require('../models/EventItem');
 const EventPlan = require('../models/EventPlan');
 const PlanningItem = require('../models/PlanningItem');
+const User = require('../models/User');
 const ApiError = require('../utils/ApiError');
 const progressService = require('./progressService');
 const buildTree = require('../utils/buildTree');
 const withTx = require('../utils/withTx');
+const VALID_URL_SCHEME = require('../utils/urlScheme');
+const { STATUS_TRANSITIONS } = require('../utils/statusTransitions');
 
 class EventService {
   async scheduleFromPlan(data, userId) {
@@ -80,6 +83,55 @@ class EventService {
     });
   }
 
+  async addExecutionItem(eventId, data) {
+    const { title, parentId, priority, dueDate } = data;
+
+    const event = await Event.findById(eventId);
+    if (!event) {
+      throw new ApiError(404, 'NOT_FOUND', 'Event not found');
+    }
+
+    let level = 0;
+    let parentPath = ',';
+
+    if (parentId) {
+      const parent = await EventItem.findById(parentId);
+      if (!parent) {
+        throw new ApiError(404, 'NOT_FOUND', 'Parent execution item not found');
+      }
+      // SV-M3: parent must belong to the same event
+      if (String(parent.eventId) !== String(eventId)) {
+        throw new ApiError(409, 'VALIDATION_ERROR', 'Parent item does not belong to this event');
+      }
+      level = parent.level + 1;
+      parentPath = parent.path;
+    }
+
+    // SV-M3: compute order as max sibling order + 1
+    const lastSibling = await EventItem.findOne({ eventId, parentId: parentId || null }).sort({ order: -1 });
+    const order = lastSibling ? lastSibling.order + 1 : 0;
+
+    const eItem = new EventItem({
+      eventId,
+      parentId: parentId || null,
+      title,
+      path: ',',
+      level,
+      order,
+      priority: priority || 'MEDIUM',
+      dueDate: dueDate ? new Date(dueDate) : event.startDate,
+      status: 'NOT_STARTED',
+      progressPercent: 0
+    });
+
+    eItem.path = `${parentPath}${eItem._id},`;
+    await eItem.save();
+
+    await progressService.recalculate(eventId);
+
+    return eItem;
+  }
+
   async updateExecutionItem(itemId, updateData, user) {
     const item = await EventItem.findById(itemId);
     if (!item) {
@@ -98,7 +150,6 @@ class EventService {
 
     // SV-L14: validate assigneeId refers to an existing active user
     if (assigneeId !== undefined && assigneeId !== null) {
-      const User = require('../models/User');
       const assignee = await User.findById(assigneeId);
       if (!assignee || !assignee.isActive) {
         throw new ApiError(400, 'VALIDATION_ERROR', 'Assignee must be an existing active user');
@@ -135,7 +186,6 @@ class EventService {
     }
     if (attachments !== undefined) {
       // SV-H3: URL scheme validated by zod + service defense-in-depth
-      const VALID_URL_SCHEME = /^https?:\/\//i;
       attachments.forEach(a => {
         if (!VALID_URL_SCHEME.test(a.url)) {
           throw new ApiError(400, 'VALIDATION_ERROR', 'Attachment URL must use http or https scheme');
@@ -168,13 +218,7 @@ class EventService {
         }
       }
 
-      const validTransitions = {
-        'NOT_STARTED': ['IN_PROGRESS', 'BLOCKED'],
-        'IN_PROGRESS': ['COMPLETED', 'BLOCKED'],
-        'BLOCKED': ['IN_PROGRESS'],
-        'COMPLETED': ['IN_PROGRESS']
-      };
-      const allowed = validTransitions[item.status] || [];
+      const allowed = STATUS_TRANSITIONS[item.status] || [];
       if (!allowed.includes(status)) {
         throw new ApiError(400, 'INVALID_TRANSITION', `Invalid status transition from ${item.status} to ${status}`);
       }

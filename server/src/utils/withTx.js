@@ -26,18 +26,17 @@ async function withTx(fn) {
   if (useTx) {
     let session;
     try {
-      session = await mongoose.startSession();
-    } catch {
-      return fn(null);
-    }
-
-    try {
       let result;
+      session = await mongoose.startSession();
       await session.withTransaction(async () => {
         result = await fn(session);
       });
       return result;
     } catch (err) {
+      if (!session) {
+        // startSession() itself failed — no transaction was ever attempted.
+        return fn(null);
+      }
       // Fallback: if transactions are not supported (e.g. standalone), retry without session
       const msg = String(err.message || err.codeName || '');
       if (/replica set|Transaction numbers|transactions are not supported/i.test(msg)) {
@@ -46,7 +45,7 @@ async function withTx(fn) {
       }
       throw err;
     } finally {
-      session.endSession();
+      if (session) session.endSession();
     }
   } else {
     // Standalone: no transactions, run without session

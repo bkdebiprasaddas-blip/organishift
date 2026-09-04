@@ -1,4 +1,5 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const cors = require('cors');
 const helmet = require('helmet');
 const env = require('./config/env');
@@ -29,7 +30,6 @@ app.use(
 
 // Health Check Endpoint (T-002)
 app.get('/api/health', (req, res) => {
-  const mongoose = require('mongoose');
   const dbOk = mongoose.connection.readyState === 1;
   res.status(dbOk ? 200 : 503).json({
     success: true,

@@ -2,6 +2,7 @@ const { z } = require('zod');
 const User = require('../models/User');
 const ApiError = require('../utils/ApiError');
 const asyncHandler = require('../utils/asyncHandler');
+const userService = require('../services/userService');
 
 const createUserSchema = z.object({
   name: z.string().min(2).max(60),
@@ -63,41 +64,7 @@ const getUserById = asyncHandler(async (req, res) => {
 
 const updateUser = asyncHandler(async (req, res) => {
   const parsed = updateUserSchema.parse(req.body);
-  const user = await User.findById(req.params.id);
-  if (!user) {
-    throw new ApiError(404, 'NOT_FOUND', 'User not found');
-  }
-
-  // SV-M8: prevent self-demotion/deactivation
-  if (String(req.params.id) === String(req.user._id)) {
-    if (parsed.role && parsed.role !== user.role) {
-      throw new ApiError(409, 'VALIDATION_ERROR', 'Cannot change your own role');
-    }
-    if (parsed.isActive === false) {
-      throw new ApiError(409, 'VALIDATION_ERROR', 'Cannot deactivate yourself');
-    }
-  }
-
-  // SV-M8: prevent removing the last active admin
-  if (parsed.role && parsed.role !== 'ADMIN' && user.role === 'ADMIN' && user.isActive) {
-    const adminCount = await User.countDocuments({ role: 'ADMIN', isActive: true });
-    if (adminCount <= 1) {
-      throw new ApiError(409, 'VALIDATION_ERROR', 'Cannot demote the last active admin');
-    }
-  }
-  if (parsed.isActive === false && user.role === 'ADMIN' && user.isActive) {
-    const adminCount = await User.countDocuments({ role: 'ADMIN', isActive: true });
-    if (adminCount <= 1) {
-      throw new ApiError(409, 'VALIDATION_ERROR', 'Cannot deactivate the last active admin');
-    }
-  }
-
-  if (parsed.name) user.name = parsed.name;
-  if (parsed.role) user.role = parsed.role;
-  if (parsed.isActive !== undefined) user.isActive = parsed.isActive;
-
-  await user.save();
-
+  const user = await userService.updateUser(req.params.id, parsed, req.user);
   return res.status(200).json({
     success: true,
     data: user,
@@ -105,28 +72,8 @@ const updateUser = asyncHandler(async (req, res) => {
   });
 });
 
-const deleteUser = asyncHandler(async (req, res) => {
-  const user = await User.findById(req.params.id);
-  if (!user) {
-    throw new ApiError(404, 'NOT_FOUND', 'User not found');
-  }
-
-  // SV-M8: prevent self-deactivation
-  if (String(req.params.id) === String(req.user._id)) {
-    throw new ApiError(409, 'VALIDATION_ERROR', 'Cannot deactivate yourself');
-  }
-
-  // SV-M8: prevent removing the last active admin
-  if (user.role === 'ADMIN' && user.isActive) {
-    const adminCount = await User.countDocuments({ role: 'ADMIN', isActive: true });
-    if (adminCount <= 1) {
-      throw new ApiError(409, 'VALIDATION_ERROR', 'Cannot deactivate the last active admin');
-    }
-  }
-
-  user.isActive = false;
-  await user.save();
-
+const deactivateUser = asyncHandler(async (req, res) => {
+  await userService.deactivateUser(req.params.id, req.user);
   return res.status(200).json({
     success: true,
     message: 'User deactivated successfully'
@@ -138,5 +85,5 @@ module.exports = {
   createUser,
   getUserById,
   updateUser,
-  deleteUser
+  deactivateUser
 };
