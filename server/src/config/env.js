@@ -1,21 +1,18 @@
-const dotenv = require('dotenv');
+const path = require('path');
+require('dotenv').config({ path: path.join(__dirname, '../../.env') });
 
-dotenv.config();
-
-const env = {
+module.exports = {
   PORT: process.env.PORT || 5000,
-  MONGO_URI: process.env.MONGO_URI,
-  JWT_SECRET: process.env.JWT_SECRET,
-  JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || '1h',
+  MONGO_URI: process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/organishift',
+  JWT_SECRET: (() => {
+    const s = process.env.JWT_SECRET;
+    // SV-L3: fail-closed unless explicitly development
+    if (!s && process.env.NODE_ENV !== 'development') {
+      throw new Error('JWT_SECRET must be set');
+    }
+    return s || 'dev-only-insecure-secret-change-me';
+  })(),
+  JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || '24h',
   CLIENT_ORIGIN: process.env.CLIENT_ORIGIN || 'http://localhost:5173',
   NODE_ENV: process.env.NODE_ENV || 'development'
 };
-
-const required = ['MONGO_URI', 'JWT_SECRET'];
-const missing = required.filter((key) => !env[key]);
-if (missing.length > 0) {
-  console.error(`Missing required env vars: ${missing.join(', ')}. Copy server/.env.example to server/.env and fill them in.`);
-  process.exit(1);
-}
-
-module.exports = env;

@@ -1,9 +1,10 @@
 class ApiError extends Error {
-  constructor(statusCode, message, errors) {
+  constructor(statusCode, code, message, details = null) {
     super(message);
     this.statusCode = statusCode;
-    this.success = false;
-    this.errors = errors;
+    this.code = code;
+    this.details = details;
+    Error.captureStackTrace(this, this.constructor);
   }
 }
 

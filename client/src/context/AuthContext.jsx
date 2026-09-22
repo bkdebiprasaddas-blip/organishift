@@ -1,89 +1,54 @@
-import { createContext, useContext, useEffect, useState } from 'react';
-import http from '../api/http';
+import { createContext, useState, useEffect, useContext } from 'react';
+import { authService } from '../services/authService';
 
 const AuthContext = createContext(null);
 
-const TOKEN_KEY = 'organishift_token';
-const USER_KEY = 'organishift_user';
-
-function readStoredUser() {
-  try {
-    return JSON.parse(localStorage.getItem(USER_KEY) || 'null');
-  } catch {
-    return null;
-  }
-}
-
-export function AuthProvider({ children }) {
-  const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY));
-  const [user, setUser] = useState(readStoredUser);
-  const [loading, setLoading] = useState(Boolean(token));
+export const AuthProvider = ({ children }) => {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!token) {
-      setLoading(false);
-      return undefined;
-    }
-    let mounted = true;
-    setLoading(true);
-    http
-      .get('/auth/me')
-      .then((res) => {
-        if (!mounted) return;
-        const freshUser = res.data.data.user;
-        setUser(freshUser);
-        localStorage.setItem(USER_KEY, JSON.stringify(freshUser));
-      })
-      .catch(() => {
-        if (!mounted) return;
-        localStorage.removeItem(TOKEN_KEY);
-        localStorage.removeItem(USER_KEY);
-        setToken(null);
+    const initAuth = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        if (token) {
+          const userData = await authService.getMe();
+          setUser(userData);
+        }
+      } catch (error) {
+        console.error('Session initialization failed:', error);
         setUser(null);
-      })
-      .finally(() => {
-        if (mounted) setLoading(false);
-      });
-    return () => {
-      mounted = false;
+        localStorage.removeItem('token');
+      } finally {
+        setLoading(false);
+      }
     };
-  }, [token]);
 
-  const applySession = (userData, newToken) => {
-    localStorage.setItem(TOKEN_KEY, newToken);
-    localStorage.setItem(USER_KEY, JSON.stringify(userData));
-    setUser(userData);
-    setToken(newToken);
-  };
+    initAuth();
+  }, []);
 
   const login = async (email, password) => {
-    const res = await http.post('/auth/login', { email, password });
-    const { user: userData, token: newToken } = res.data.data;
-    applySession(userData, newToken);
-    return userData;
-  };
-
-  const register = async (name, email, password) => {
-    const res = await http.post('/auth/register', { name, email, password });
-    const { user: userData, token: newToken } = res.data.data;
-    applySession(userData, newToken);
+    const userData = await authService.login(email, password);
+    setUser(userData);
     return userData;
   };
 
   const logout = () => {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
-    setToken(null);
+    authService.logout();
     setUser(null);
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, register, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, logout }}>
       {children}
     </AuthContext.Provider>
   );
-}
+};
 
-export function useAuth() {
-  return useContext(AuthContext);
-}
+export const useAuth = () => {
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+  return context;
+};

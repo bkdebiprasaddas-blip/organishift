@@ -1,71 +1,103 @@
 import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useNavigate, Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { useToast } from '../context/ToastContext';
-import { apiErrorMessage } from '../api/errors';
-import styles from '../styles/login.module.css';
 
 export default function Login() {
-  const { login } = useAuth();
-  const { showToast } = useToast();
-  const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const { login, user, loading } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const from = location.state?.from || '/dashboard';
 
-  const submit = async (e) => {
+  if (loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-slate-100">
+        <div className="flex items-center gap-3 text-slate-500">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-slate-300 border-t-indigo-600"></div>
+          <span className="text-sm font-semibold">Restoring session...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (user) {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-    setBusy(true);
+    setSubmitting(true);
+
     try {
       await login(email, password);
-      navigate('/');
+      navigate(from, { replace: true });
     } catch (err) {
-      setError(apiErrorMessage(err, 'Login failed'));
-      showToast('Login failed', 'error');
+      setError(err.message || 'Invalid email or password');
     } finally {
-      setBusy(false);
+      setSubmitting(false);
     }
   };
 
   return (
-    <div className={styles.page}>
-      <div className={styles.card}>
-        <div className={styles.brand}>
-          <span className={styles.brandMark}>OS</span>
-          <h1 className={styles.brandName}>OrganiShift</h1>
-          <p className={styles.brandTag}>Plan events. Assign tasks. Track progress.</p>
+    <div className="flex min-h-screen flex-col bg-gradient-to-b from-indigo-50 via-white to-white font-sans text-slate-900 items-center justify-center px-4 py-12">
+      <div className="w-full max-w-sm">
+        <div className="mb-6 flex flex-col items-center text-center">
+          <img src="/assets/logo.svg" alt="OrganiShift" className="h-20 w-auto drop-shadow-md" />
+          <h1 className="mt-3 text-xl font-bold tracking-tight">Sign in to OrganiShift</h1>
         </div>
-        <form className={styles.form} onSubmit={submit}>
-          {error && <div className="alert alert--error">{error}</div>}
-          <label className="field">
-            <span className="field__label">Email</span>
-            <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required autoFocus />
-          </label>
-          <label className="field">
-            <span className="field__label">Password</span>
-            <div className="password-wrap">
+
+        <div className="rounded-xl border border-slate-200 bg-white p-6 shadow-card">
+          <form onSubmit={handleSubmit} className="space-y-5">
+            {error && (
+              <div className="flex items-center gap-2.5 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800 font-medium">
+                {error}
+              </div>
+            )}
+
+            <div>
+              <label htmlFor="email" className="block text-sm font-semibold text-slate-700">Email</label>
               <input
-                className="input"
-                type={showPassword ? 'text' : 'password'}
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                className="mt-1.5 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm shadow-sm placeholder:text-slate-400 focus:border-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-600"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="password" className="block text-sm font-semibold text-slate-700">Password</label>
+              <input
+                id="password"
+                type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
+                className="mt-1.5 block w-full rounded-lg border border-slate-300 px-3 py-2 text-sm shadow-sm placeholder:text-slate-400 focus:border-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-600"
               />
-              <button type="button" className="password-toggle" onClick={() => setShowPassword((s) => !s)}>
-                {showPassword ? 'Hide' : 'Show'}
-              </button>
             </div>
-          </label>
-          <button type="submit" className="btn btn--primary btn--block" disabled={busy}>
-            {busy ? 'Signing in…' : 'Sign in'}
-          </button>
-        </form>
-        <p className={styles.switch}>
-          No account? <Link to="/register">Create one</Link>
-        </p>
+
+            <button
+              type="submit"
+              disabled={submitting}
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {submitting ? (
+                <>
+                  <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent"></div>
+                  Signing in...
+                </>
+              ) : (
+                'Sign in'
+              )}
+            </button>
+          </form>
+        </div>
       </div>
     </div>
   );
