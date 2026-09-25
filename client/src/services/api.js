@@ -30,8 +30,12 @@ api.interceptors.response.use(
   (error) => {
     if (error.response?.data?.error) {
       const err = error.response.data.error;
-      // CL-M2: global 401 handling — clear token + redirect to login
-      if (error.response.status === 401) {
+      // CL-M2: global 401 handling — clear token + redirect to login.
+      // Skip for the login request itself: a bad-credentials 401 there is a
+      // normal form error, not an expired session, and should not hard-reload
+      // the page (which wipes the error message before it can be read).
+      const isLoginRequest = error.config?.url?.includes('/auth/login');
+      if (error.response.status === 401 && !isLoginRequest) {
         localStorage.removeItem('token');
         window.location.href = '/login';
       }
