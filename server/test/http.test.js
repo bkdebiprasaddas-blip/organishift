@@ -1,3 +1,8 @@
+// Must be set BEFORE anything requires src/config/env, so the suite never
+// depends on the developer's local .env and the JWT secret is not validated
+// against a production placeholder.
+process.env.NODE_ENV = 'test';
+
 const { test, before, after } = require('node:test');
 const assert = require('node:assert');
 const http = require('node:http');
@@ -11,6 +16,20 @@ const EventItem = require('../src/models/EventItem');
 
 let server, base;
 let adminToken = '', managerToken = '', memberToken = '';
+let adminId, managerId, memberId;
+
+/**
+ * "YYYY-MM-DD" for a calendar date `days` away from today, in UTC.
+ *
+ * Fixtures that schedule events MUST use this instead of a hardcoded literal.
+ * POST /api/events rejects past dates, so any literal eventually rots into a
+ * 400 and the test that depends on the event existing fails for the wrong
+ * reason (this already broke SV-M13 on 2026-09-20).
+ */
+function futureDateKey(days = 0) {
+  const t = new Date(Date.now() + days * 86400000);
+  return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, '0')}-${String(t.getUTCDate()).padStart(2, '0')}`;
+}
 
 async function req(method, path, { token, body } = {}) {
   const res = await fetch(base + path, {
@@ -32,9 +51,10 @@ before(async () => {
 
   await Promise.all([User.deleteMany({}), PlanningItem.deleteMany({})]);
   const admin = await User.create({ name: 'Admin', email: 'a@t.com', passwordHash: 'Secret123', role: 'ADMIN' });
-  await User.create({ name: 'Manager', email: 'm@t.com', passwordHash: 'Secret123', role: 'MANAGER' });
-  await User.create({ name: 'Member', email: 'u@t.com', passwordHash: 'Secret123', role: 'MEMBER' });
-  void admin;
+  const manager = await User.create({ name: 'Manager', email: 'm@t.com', passwordHash: 'Secret123', role: 'MANAGER' });
+  const member = await User.create({ name: 'Member', email: 'u@t.com', passwordHash: 'Secret123', role: 'MEMBER' });
+  adminId = admin._id; managerId = manager._id; memberId = member._id;
+  void admin; void manager; void member;
 
   const jwt = require('jsonwebtoken');
   adminToken = jwt.sign({ id: (await User.findOne({ email: 'a@t.com' }))._id, role: 'ADMIN' }, env.JWT_SECRET);
@@ -158,6 +178,35 @@ test('H-10: scheduling with a past date -> 400 VALIDATION_ERROR', async () => {
   assert.strictEqual(json.error.code, 'VALIDATION_ERROR');
 });
 
+test('SV-D1: same-day scheduling is allowed (was rejected east of Greenwich)', async () => {
+  const plan = (await req('POST', '/api/event-plans', {
+    token: adminToken, body: { title: 'Same Day Plan' }
+  })).json.data;
+
+  // startDate is a calendar date, so "today" must be accepted. The old check
+  // compared the full timestamp (todayT00:00Z) against `new Date()`, which is
+  // already past for any user east of Greenwich.
+  const { status, json } = await req('POST', '/api/events', {
+    token: adminToken,
+    body: { title: 'Today Event', planId: plan._id, startDate: futureDateKey(0) }
+  });
+  assert.strictEqual(status, 201, `same-day scheduling rejected: ${JSON.stringify(json)}`);
+  assert.strictEqual(json.data.event.status, 'PLANNED');
+});
+
+test('SV-D2: yesterday is still rejected (past-date guard not weakened)', async () => {
+  const plan = (await req('POST', '/api/event-plans', {
+    token: adminToken, body: { title: 'Yesterday Plan' }
+  })).json.data;
+
+  const { status, json } = await req('POST', '/api/events', {
+    token: adminToken,
+    body: { title: 'Yesterday Event', planId: plan._id, startDate: futureDateKey(-1) }
+  });
+  assert.strictEqual(status, 400);
+  assert.strictEqual(json.error.code, 'VALIDATION_ERROR');
+});
+
 test('H-11: unknown API route -> 404 JSON envelope (never HTML)', async () => {
   const { status, json } = await req('GET', '/api/does-not-exist');
   assert.strictEqual(status, 404);
@@ -206,7 +255,7 @@ test('H-14: whitespace-only execution item title -> 400 VALIDATION_ERROR (schema
   const plan = (await req('POST', '/api/event-plans', {
     token: adminToken, body: { title: 'WS Plan' }
   })).json.data;
-  const future = '2030-06-01';
+  const future = futureDateKey(60);
   const event = (await req('POST', '/api/events', {
     token: managerToken, body: { title: 'WS Event', planId: plan._id, startDate: future }
   })).json.data;
@@ -225,7 +274,7 @@ test('H-15: addExecutionItem invalid priority -> 400; valid -> 201 + progress re
   })).json.data;
   const event = (await req('POST', '/api/events', {
     token: managerToken,
-    body: { title: 'Item Event', planId: plan._id, startDate: '2030-07-01' }
+    body: { title: 'Item Event', planId: plan._id, startDate: futureDateKey(61) }
   })).json.data;
   const eventId = event.event._id;
 
@@ -254,7 +303,7 @@ test('H-16: updateEvent rejects bad status enum -> 400; legal ONGOING->DONE -> 2
   })).json.data;
   const event = (await req('POST', '/api/events', {
     token: managerToken,
-    body: { title: 'Status Event', planId: plan._id, startDate: '2030-08-01' }
+    body: { title: 'Status Event', planId: plan._id, startDate: futureDateKey(62) }
   })).json.data;
   const id = event.event._id;
 
@@ -281,25 +330,77 @@ test('H-17: GET /api/events?from=&to= date filtering works', async () => {
   const plan = (await req('POST', '/api/event-plans', {
     token: adminToken, body: { title: 'Filter Plan' }
   })).json.data;
-  await req('POST', '/api/events', {
+
+  // Relative dates so this can never rot into a past date (see futureDateKey).
+  const inWindow = futureDateKey(20);
+  const outOfWindow = futureDateKey(200);
+  const winFrom = futureDateKey(10);
+  const winTo = futureDateKey(30);
+
+  const near = await req('POST', '/api/events', {
     token: managerToken,
-    body: { title: 'July Event', planId: plan._id, startDate: '2030-07-15' }
+    body: { title: 'Near Event', planId: plan._id, startDate: inWindow }
   });
+  assert.strictEqual(near.status, 201, `setup failed: ${JSON.stringify(near.json)}`);
   await req('POST', '/api/events', {
     token: managerToken,
-    body: { title: 'Dec Event', planId: plan._id, startDate: '2030-12-15' }
+    body: { title: 'Far Event', planId: plan._id, startDate: outOfWindow }
   });
 
-  const all = (await req('GET', '/api/events', { token: memberToken })).json.data;
+  // Uses an ADMIN token on purpose: this test is about date filtering, not role
+  // scoping (see SV-M10b below for the MEMBER visibility rules). It previously
+  // used memberToken, which only ever returned rows because /api/events did not
+  // scope by role.
+  const all = (await req('GET', '/api/events', { token: adminToken })).json.data;
   assert.ok(Array.isArray(all) && all.length >= 2);
 
   const filtered = (await req(
     'GET',
-    '/api/events?from=2030-07-01&to=2030-07-31',
-    { token: memberToken }
+    `/api/events?from=${winFrom}&to=${winTo}`,
+    { token: adminToken }
   )).json.data;
-  assert.ok(filtered.every(e => e.startDate >= '2030-07' && e.startDate < '2030-08'));
-  assert.ok(filtered.length >= 1);
+
+  assert.ok(filtered.some(e => e.title === 'Near Event'), 'in-window event missing');
+  assert.ok(!filtered.some(e => e.title === 'Far Event'), 'out-of-window event leaked in');
+});
+
+test('SV-M10b: GET /api/events scopes MEMBERs to events they are assigned to', async () => {
+  const plan = (await req('POST', '/api/event-plans', {
+    token: adminToken, body: { title: 'Scoping Plan' }
+  })).json.data;
+  const libRoot = await makeLibraryBranch('ScopeEv');
+  // The event copies items out of the plan, so the plan needs PLAN-scope items
+  // first — scheduling from an empty plan produces an event with no checklist.
+  const copied = await req('POST', `/api/event-plans/${plan._id}/items/from-library`, {
+    token: adminToken, body: { libraryItemId: libRoot }
+  });
+  assert.strictEqual(copied.status, 201, `copyFromLibrary failed: ${JSON.stringify(copied.json)}`);
+
+  // Event A: has a checklist item the member will own.
+  const created = await req('POST', '/api/events', {
+    token: adminToken,
+    body: { title: 'Scoped In Event', planId: plan._id, startDate: futureDateKey(40) }
+  });
+  assert.strictEqual(created.status, 201, `schedule failed: ${JSON.stringify(created.json)}`);
+  const eventAId = created.json.data.event._id;
+  // Event B: no assignments at all — must be invisible to the member.
+  await req('POST', '/api/events', {
+    token: adminToken,
+    body: { title: 'Scoped Out Event', planId: plan._id, startDate: futureDateKey(41) }
+  });
+
+  const items = await EventItem.find({ eventId: eventAId }).sort({ level: 1 });
+  assert.ok(items.length > 0, 'scheduled event should have copied checklist items');
+  const leaf = items[items.length - 1];
+  await EventItem.updateOne({ _id: leaf._id }, { assigneeId: memberId });
+
+  const memberView = (await req('GET', '/api/events', { token: memberToken })).json.data;
+  assert.ok(memberView.some(e => e.title === 'Scoped In Event'), 'assigned event should be visible');
+  assert.ok(!memberView.some(e => e.title === 'Scoped Out Event'), 'unassigned event leaked to MEMBER');
+
+  // Admins and Managers are unaffected.
+  const adminView = (await req('GET', '/api/events', { token: adminToken })).json.data;
+  assert.ok(adminView.some(e => e.title === 'Scoped Out Event'), 'ADMIN should see all events');
 });
 
 test('H-18: deleteEvent cascades — zero orphan execution items remain', async () => {
@@ -313,7 +414,7 @@ test('H-18: deleteEvent cascades — zero orphan execution items remain', async 
   });
   const event = (await req('POST', '/api/events', {
     token: managerToken,
-    body: { title: 'Doomed Event', planId: plan._id, startDate: '2030-09-01' }
+    body: { title: 'Doomed Event', planId: plan._id, startDate: futureDateKey(63) }
   })).json.data;
   const eventId = event.event._id;
   const before = await EventItem.countDocuments({ eventId });
@@ -379,11 +480,14 @@ test('SV-M13: deletePlan with scheduled events -> 409 CONFLICT', async () => {
   await req('POST', `/api/event-plans/${plan._id}/items/from-library`, {
     token: adminToken, body: { libraryItemId: libRoot }
   });
-  // Schedule a real event from this plan
-  await req('POST', '/api/events', {
+  // Schedule a real event from this plan. The start date MUST be relative to
+  // "now" — a hardcoded literal silently became a past date, the POST returned
+  // 400, no event existed, and the SV-M13 assertion below failed with 200.
+  const sched = await req('POST', '/api/events', {
     token: adminToken,
-    body: { title: 'Event from Protected Plan', planId: plan._id, startDate: '2026-09-20' }
+    body: { title: 'Event from Protected Plan', planId: plan._id, startDate: futureDateKey(30) }
   });
+  assert.strictEqual(sched.status, 201, `event scheduling failed: ${JSON.stringify(sched.json)}`);
 
   const del = await req('DELETE', `/api/event-plans/${plan._id}`, { token: adminToken });
   assert.strictEqual(del.status, 409);

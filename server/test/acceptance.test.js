@@ -1,3 +1,8 @@
+// Must be set BEFORE anything requires src/config/env, so the suite never
+// depends on the developer's local .env and the JWT secret is not validated
+// against a production placeholder.
+process.env.NODE_ENV = 'test';
+
 const { test, before, after, beforeEach } = require('node:test');
 const assert = require('node:assert');
 const mongoose = require('mongoose');
@@ -124,6 +129,65 @@ test('T-06: Member sending priority -> FORBIDDEN', async () => {
   );
 });
 
+test('T-05b: adding a comment does NOT re-attribute existing comments', async () => {
+  // Regression guard. The client always PUTs the whole comment array, and the
+  // service used to stamp `user`/`userName` on every entry, so the next person
+  // to comment silently rewrote everyone else's authorship.
+  const { mk } = await makeEventWithTree();
+  const leaf = await mk('Leaf', null, ',', 0, 0, { assigneeId: memberUser._id });
+
+  // Member posts the first comment.
+  const afterFirst = await eventService.updateExecutionItem(
+    leaf._id,
+    { comments: [{ text: 'first from member' }] },
+    memberUser
+  );
+  assert.strictEqual(afterFirst.comments.length, 1);
+  const firstId = String(afterFirst.comments[0]._id);
+  assert.strictEqual(String(afterFirst.comments[0].user), String(memberUser._id));
+  assert.strictEqual(afterFirst.comments[0].userName, memberUser.name);
+
+  // Manager replies, echoing the existing comment back with its _id (as the
+  // TaskDetailDrawer does) plus a new one.
+  const echoed = afterFirst.comments.map(c => ({
+    _id: String(c._id),
+    text: c.text,
+    createdAt: c.createdAt
+  }));
+  const afterSecond = await eventService.updateExecutionItem(
+    leaf._id,
+    { comments: [...echoed, { text: 'reply from manager' }] },
+    managerUser
+  );
+
+  assert.strictEqual(afterSecond.comments.length, 2);
+  const preserved = afterSecond.comments.find(c => String(c._id) === firstId);
+  assert.ok(preserved, 'original comment should survive');
+  assert.strictEqual(
+    String(preserved.user), String(memberUser._id),
+    'original comment was re-attributed to the replying user'
+  );
+  assert.strictEqual(preserved.userName, memberUser.name);
+  assert.strictEqual(preserved.text, 'first from member');
+
+  // The genuinely new comment is attributed to whoever sent it.
+  const reply = afterSecond.comments.find(c => c.text === 'reply from manager');
+  assert.strictEqual(String(reply.user), String(managerUser._id));
+});
+
+test('T-05c: a client cannot forge a comment author', async () => {
+  const { mk } = await makeEventWithTree();
+  const leaf = await mk('Leaf', null, ',', 0, 0, { assigneeId: memberUser._id });
+
+  const updated = await eventService.updateExecutionItem(
+    leaf._id,
+    { comments: [{ text: 'spoof attempt', user: adminUser._id, userName: 'Admin' }] },
+    memberUser
+  );
+  assert.strictEqual(String(updated.comments[0].user), String(memberUser._id));
+  assert.strictEqual(updated.comments[0].userName, memberUser.name);
+});
+
 test('T-07: Member cannot re-open COMPLETED even when owner', async () => {
   const { mk } = await makeEventWithTree();
   const leaf = await mk('Leaf', null, ',', 0, 0, {
@@ -213,8 +277,11 @@ test('T-13: scheduleFromPlan clones full blueprint — counts, defaults, isolati
   pLeaf.path = `,${pRoot._id},${pLeaf._id},`;
   await pLeaf.save();
 
+  // Relative date: a hardcoded literal rots into a past date and this becomes
+  // time-dependent for no reason (scheduleFromPlan does not itself validate).
+  const startKey = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
   const { event, itemCount } = await eventService.scheduleFromPlan(
-    { title: 'Scheduled E', planId: String(plan._id), startDate: '2026-09-10' },
+    { title: 'Scheduled E', planId: String(plan._id), startDate: startKey },
     adminUser._id
   );
 

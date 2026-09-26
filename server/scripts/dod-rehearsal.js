@@ -105,9 +105,17 @@ async function main() {
     // 6 — Manager schedules event (future date) -> 11 execution items
     t = await req('POST', '/api/auth/login', { body: { email: 'manager@organishift.dev', password: 'Password123!' } });
     const manager = t.json.data.token;
-    t = await req('POST', '/api/events', { token: manager, body: { title: 'Annual Function', planId: plan._id, startDate: '2026-09-12', venue: 'Main Auditorium' } });
+    // Relative date, NOT a literal. POST /api/events rejects past dates, so a
+    // hardcoded startDate silently became invalid and took the whole rehearsal
+    // down with "Cannot read properties of undefined (reading 'event')" — this
+    // script is the documented viva fallback, so it has to stay runnable.
+    const startKey = new Date(Date.now() + 45 * 86400000).toISOString().slice(0, 10);
+    t = await req('POST', '/api/events', { token: manager, body: { title: 'Annual Function', planId: plan._id, startDate: startKey, venue: 'Main Auditorium' } });
+    if (t.status !== 201) {
+      throw new Error(`Step 6 failed to schedule the event (HTTP ${t.status}): ${JSON.stringify(t.json)}`);
+    }
     const eventId = t.json.data.event._id;
-    check(6, 'Manager schedules event (execution copy 11)', t.status === 201 && t.json.data.itemCount === 11, `items=${t.json.data.itemCount}`);
+    check(6, 'Manager schedules event (execution copy 11)', t.json.data.itemCount === 11, `items=${t.json.data.itemCount}`);
 
     // find Procurement + its leaves in the execution tree
     const det = () => req('GET', `/api/events/${eventId}`, { token: manager }).then(r => r.json.data);

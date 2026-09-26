@@ -141,7 +141,7 @@ analytics, or storage providers are integrated. *(The system is self-contained.)
 ## 2. Project at a Glance
 
 (Table above in §1. Key facts: **monolith**, **MERN**, **solo**, **LOCAL +
-UNCOMMITTED**, **6 pages**, **3 roles**, **40 tests passing**.)
+UNCOMMITTED**, **6 pages**, **3 roles**, **53 tests passing**.)
 
 ---
 

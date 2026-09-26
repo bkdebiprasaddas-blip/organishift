@@ -43,7 +43,7 @@ Demo accounts — password `Password123!` for all:
 | 13 | Return to admin Dashboard | Counters add up (total = leaves across events), overdue flagged red, overall % consistent with the event page |
 
 **Wrap-up line for examiners:** every number above is also asserted
-automatically — `cd server && npm test` prints 40 passing tests including this
+automatically — `cd server && npm test` prints 53 passing tests including this
 exact scenario, and `node scripts/dod-rehearsal.js` replays these 13 steps over
 real HTTP.
 

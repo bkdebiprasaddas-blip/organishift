@@ -7,7 +7,7 @@
 > GitHub/Markdown viewers.
 >
 > **Project:** OrganiShift — Reusable Event Planning, Scheduling & Execution Tracking
-> **Stack:** MERN (MongoDB · Express · React · Node) · **Phase:** 1 MVP · **Status:** 40/40 tests passing
+> **Stack:** MERN (MongoDB · Express · React · Node) · **Phase:** 1 MVP · **Status:** 53/53 tests passing
 
 ---
 
