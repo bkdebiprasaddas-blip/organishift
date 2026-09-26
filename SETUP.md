@@ -44,10 +44,22 @@ Server variables (`server/.env`):
 |---|---|---|
 | `PORT` | API port | `5000` |
 | `MONGO_URI` | MongoDB connection string | `mongodb://127.0.0.1:27017/organishift` |
-| `JWT_SECRET` | Token signing secret (**required in production**) | dev fallback |
+| `JWT_SECRET` | Token signing secret — **required; the server will not start without it** (>= 16 chars) | none, you must generate one |
 | `JWT_EXPIRES_IN` | Token lifetime | `24h` |
 | `CLIENT_ORIGIN` | Allowed CORS origin | `http://localhost:5173` |
 | `NODE_ENV` | `development` / `production` | `development` |
+| `ALLOW_INSECURE_DEV_SECRET` | Set `true` to permit the known dev secret when `JWT_SECRET` is absent. Development only. | unset |
+| `TRUST_PROXY` | Trusted reverse-proxy hop count. Set to `1` when deployed behind nginx/Heroku/Cloudflare. | unset |
+
+Generate a real `JWT_SECRET` before first run:
+
+```
+node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
+```
+
+The server refuses to boot without one. This is deliberate: the old behaviour
+fell back to a hardcoded secret that is public in this repository, which would
+have let anyone forge an ADMIN token.
 
 Client variable (`client/.env`): `VITE_API_URL` (defaults to
 `http://localhost:5000/api`).

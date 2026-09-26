@@ -7,7 +7,7 @@
 > GitHub/Markdown viewers.
 >
 > **Project:** OrganiShift — Reusable Event Planning, Scheduling & Execution Tracking
-> **Stack:** MERN (MongoDB · Express · React · Node) · **Phase:** 1 MVP · **Status:** 53/53 tests passing
+> **Stack:** MERN (MongoDB · Express · React · Node) · **Phase:** 1 MVP · **Status:** 57/57 tests passing
 
 ---
 
@@ -47,7 +47,7 @@ Planning Library         Event Plan           Scheduled Event          Execution
 | **Auth** | JWT bearer tokens + bcrypt password hashing |
 | **Database** | MongoDB, 5 collections, materialized-path trees |
 | **Pages** | Login, Dashboard, Planning Library, Event Plans, Calendar, Execution |
-| **Testing** | 40/40 server tests passing; client production build clean |
+| **Testing** | 57/57 server tests passing; client production build clean |
 | **Language** | JavaScript (server CommonJS, client ESM) |
 
 ---
@@ -199,11 +199,14 @@ MongoDB          5 collections
 - **RBAC** (ADMIN/MANAGER/MEMBER) at route + field level.
 - **Member object-scoping** (`utils/scopeItemsForMember.js`) — a member only sees
   their assigned branch — a form of **object-level authorization (BOLA mitigation)**.
-- **Secrets safe:** `.env` git-ignored; production **throws** if `JWT_SECRET` unset.
+- **Secrets safe:** `.env` git-ignored; the server **refuses to start** if
+  `JWT_SECRET` is unset (not just in production), rejects documented placeholder
+  values in production, and requires >= 16 characters. Previously a missing
+  `NODE_ENV` bypassed the guard and fell back to a public hardcoded secret.
 
 ### Testing & quality (evidence)
 ```
-cd server && npm test     → 40/40 passing (node:test, acceptance + HTTP)
+cd server && npm test     → 57/57 passing (node:test, acceptance + HTTP)
 cd client && npm run lint → clean (ESLint, --max-warnings 0)
 cd client && npm run build→ clean Vite production build
 node scripts/dod-rehearsal.js → 13-step Definition-of-Done scenario passes over HTTP

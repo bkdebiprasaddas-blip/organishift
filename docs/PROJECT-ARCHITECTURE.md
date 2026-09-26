@@ -55,7 +55,7 @@ clone forever, track execution in one place with clear accountability per role.*
 ### Maturity
 
 - Branch `v1`; a single-person (solo) project.
-- Server acceptance test suite: **40/40 passing** (`node --test`).
+- Server acceptance test suite: **57/57 passing** (`node --test`).
 - Client Vite production build: clean, 0 errors.
 - Current phase per `BOOTSTRAP.md`: **TESTING complete + UI/UX refinement
   delivered**; release gate not yet approved.
@@ -130,7 +130,7 @@ analytics, or storage providers are integrated. *(The system is self-contained.)
 | **Architecture** | Three-tier monolith + modular service layer |
 | **Auth** | JWT bearer tokens, 3 roles (ADMIN/MANAGER/MEMBER) |
 | **Database** | MongoDB, 5 collections, materialized-path trees |
-| **Tests** | Node's built-in test runner (`node:test`), 40 passing |
+| **Tests** | Node's built-in test runner (`node:test`), 57 passing |
 | **Build** | Vite (client), plain Node (server) |
 | **Deployment** | Local only — not yet deployed |
 | **Branch** | `v1` (solo project) |
@@ -1016,8 +1016,20 @@ roles then gate "what".)**
 
 ### Secrets
 
-- `JWT_SECRET` from env; **production throws** if not set (`env.js`). Dev fallback
-  is a clearly-marked insecure constant.
+- `JWT_SECRET` from env; **the server refuses to start if it is missing**, in every
+  environment (`config/env.js`). A supplied secret must be at least 16 characters,
+  and the documented placeholders (`replace-with-a-long-random-secret`,
+  `dev-only-insecure-secret-change-me`) are rejected outright under
+  `NODE_ENV=production`. The insecure dev fallback still exists but must be opted
+  into with `ALLOW_INSECURE_DEV_SECRET=true` and is ignored outside development.
+  Generate one with:
+  `node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"`
+- `TRUST_PROXY` (optional, default unset) — number of trusted reverse proxies in
+  front of the API. Required behind nginx/Heroku/Cloudflare, otherwise
+  `express-rate-limit` sees only the proxy's IP and one client can lock everyone
+  out of `/auth/login`. Never set it to `true` on a public host: that trusts
+  `X-Forwarded-For` from any caller and lets clients spoof their IP to bypass the
+  login limiter.
 
 ### Potential weaknesses (evidence-based, non-exploitative)
 
@@ -1051,10 +1063,12 @@ roles then gate "what".)**
 |---|---|---|---|---|---|
 | `PORT` | API listen port | no | `5000` | `server.js` | no |
 | `MONGO_URI` | MongoDB connection | no | `mongodb://127.0.0.1:27017/organishift` | `db.js` | maybe (creds) |
-| `JWT_SECRET` | JWT signing secret | **yes in prod** | dev fallback (insecure) | `authController`/`authMiddleware` | **yes** |
+| `JWT_SECRET` | JWT signing secret | **yes — always** (throws if missing in any environment; >= 16 chars; placeholders rejected in production) | none, unless `ALLOW_INSECURE_DEV_SECRET=true` in development | `authController`/`authMiddleware` | **yes** |
 | `JWT_EXPIRES_IN` | token lifetime | no | `24h` | `authController` | no |
 | `CLIENT_ORIGIN` | CORS allowed origin | no | `http://localhost:5173` | `server.js` | no |
 | `NODE_ENV` | `development`/`production` | no | `development` | `env.js`/`errorMiddleware` | no |
+| `ALLOW_INSECURE_DEV_SECRET` | opt in to the known dev JWT secret | no | unset (server throws) | `env.js` | no |
+| `TRUST_PROXY` | trusted reverse-proxy hop count | only when deployed behind a proxy | unset | `server.js` | no |
 | `VITE_API_URL` | client base URL | no | `http://localhost:5000/api` | `api.js` | no |
 
 > Secret values are NOT reproduced here and real `.env` files are
@@ -1130,7 +1144,7 @@ cd server
 npm test        # node --test --test-force-exit test/acceptance.test.js test/http.test.js
 ```
 
-- Reported result: **40/40 passing** (BOOTSTRAP).
+- Reported result: **57/57 passing** (BOOTSTRAP).
 - **Test DB:** derived from `MONGO_URI` with `_test` / `_test_http` suffix;
   tests clean collections in `beforeEach`/`before`.
 - **Auth in tests:** real JWT tokens signed for seeded test users.
@@ -1278,7 +1292,7 @@ to an envelope and HTTP status.
 
 | Severity | Finding | Evidence | Detail / Recommendation |
 |---|---|---|---|
-| **Medium** | Dev-only insecure JWT fallback | `env.js:12` | If `NODE_ENV !== 'production'`, falls back to `'dev-only-insecure-secret-change-me'`. Acceptable in dev; the production throw mitigates real risk. Ensure prod always sets `JWT_SECRET`. |
+| ~~Medium~~ **Resolved** | Dev-only insecure JWT fallback | `config/env.js` | **Was exploitable, now closed.** The guard read `NODE_ENV !== 'development'` while `NODE_ENV` itself *defaults* to `development`, so a deploy setting neither variable skipped the guard and signed tokens with the public literal `dev-only-insecure-secret-change-me` — anyone could forge an ADMIN token. Now: missing secret always throws; a set secret must be >= 16 chars; documented placeholders are rejected under `NODE_ENV=production`; and the insecure dev fallback requires an explicit `ALLOW_INSECURE_DEV_SECRET=true`, ignored outside development. Verified across 4 scenarios (see `SESSION-2026-09-26-1.md`). |
 | **Medium** | Stateless JWT, no revocation/refresh | `authController.js` | Tokens valid until expiry (24h); logout is client-side only. For production, add token version/revocation (DB-side) or short-lived tokens + refresh. **[inference]** |
 | **Low** | Potential `path` field name collision | `EventItem.js` | The `path` regex-based tree field; existing field named `path` may collide with Mongoose/MongoDB helpers. Verify before extending. |
 | **Low** | No CSRF protection | 3-tier + Bearer tokens | SPA uses Bearer tokens (not cookies), so CSRF risk is limited; if cookies were used, CSRF would be needed. **[inference]** |
