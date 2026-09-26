@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { NavLink } from 'react-router-dom';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/common/Toast';
 import { Chip, ErrorState, SkeletonCard } from '../components/common';
-import { relativeDate } from '../utils/dates';
+import { relativeDate, formatDateUTC } from '../utils/dates';
 
 const STATUS_LABEL = s => s.replace(/_/g, ' ');
 
@@ -14,13 +14,17 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [updatingId, setUpdatingId] = useState(null);
+  const statsRef = useRef(null);
 
-  // IMP-B2: skeletons only on first paint; later refreshes are silent
+  // IMP-B2: skeletons only on first paint; later refreshes are silent.
+  // A failed BACKGROUND refresh must not tear down an already-rendered
+  // dashboard, so `error` is only treated as fatal while there is no data.
   const load = (silent = false) => {
-    if (!silent) setLoading(true);
+    const isSilent = silent === true;   // never treat a click event as "silent"
+    if (!isSilent) setLoading(true);
     api.get('/dashboard/stats')
-      .then(data => { setStats(data); setError(''); })
-      .catch(err => setError(err.message || 'Failed to load dashboard'))
+      .then(data => { statsRef.current = data; setStats(data); setError(''); })
+      .catch(err => { if (!isSilent || !statsRef.current) setError(err.message || 'Failed to load dashboard'); })
       .finally(() => setLoading(false));
   };
 
@@ -93,9 +97,18 @@ export default function Dashboard() {
       {/* My Assigned Work (T-031 / UI-SPEC §6) — inline status editing */}
       <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-card">
         <div className="mb-4 flex items-center justify-between border-b border-slate-200 pb-3">
-          <h3 className="text-sm font-bold text-slate-900">My Assigned Work ({myWork.length})</h3>
+          <h3 className="text-sm font-bold text-slate-900">
+            My Assigned Work ({stats.myWorkTotal ?? myWork.length})
+          </h3>
           <span className="text-xs text-slate-500">{user?.name}</span>
         </div>
+
+        {stats.myWorkTruncated && (
+          <p className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-[11px] font-semibold text-amber-800">
+            Showing the first {myWork.length} of {stats.myWorkTotal} assigned tasks.
+            Open an event from the Execution page to work through the rest.
+          </p>
+        )}
 
         {myWork.length === 0 ? (
           <p className="py-8 text-center text-xs text-slate-500">
@@ -111,7 +124,7 @@ export default function Dashboard() {
                     <span>Event: <b className="text-slate-700">{item.eventTitle}</b></span>
                     {item.dueDate && (
                       <span className={item.isOverdue ? 'font-bold text-rose-600' : 'text-slate-700'}>
-                        <b>{relativeDate(item.dueDate)}</b> ({new Date(item.dueDate).toLocaleDateString()})
+                        <b>{relativeDate(item.dueDate)}</b> ({formatDateUTC(item.dueDate)})
                       </span>
                     )}
                     {item.isOverdue && <span className="rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-rose-800">Overdue</span>}

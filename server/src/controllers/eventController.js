@@ -8,6 +8,7 @@ const asyncHandler = require('../utils/asyncHandler');
 const buildTree = require('../utils/buildTree');
 const scopeItemsForMember = require('../utils/scopeItemsForMember');
 const withTx = require('../utils/withTx');
+const { isBeforeToday } = require('../utils/dateOnly');
 const VALID_URL_SCHEME = require('../utils/urlScheme');
 
 const scheduleEventSchema = z.object({
@@ -52,7 +53,11 @@ const updateExecutionItemSchema = z.object({
     completed: z.boolean().optional()
   })).optional(),
   comments: z.array(z.object({
-    text: z.string().min(1).max(500).optional(),
+    // _id lets the service recognise pre-existing comments and preserve their
+    // original author instead of re-attributing them to the current user.
+    // Zod strips unknown keys, so it must be declared explicitly.
+    _id: z.string().optional(),
+    text: z.string().min(1, 'Comment text is required').max(500).optional(),
     user: z.any().optional(),
     userName: z.string().max(100).optional(),
     createdAt: z.any().optional()
@@ -83,7 +88,22 @@ const getEvents = asyncHandler(async (req, res) => {
     }
   }
 
-  const events = await Event.find(filter).sort({ startDate: 1 });
+  // SV-M10 parity with dashboardController.getDashboardStats: a MEMBER may only
+  // see events they actually hold assigned work in. Without this, /api/events
+  // leaked every organisation-wide event to every authenticated user, and
+  // MEMBERs landing on an unrelated event got an empty "No checklist items" page.
+  if (req.user.role === 'MEMBER') {
+    const assignedEventIds = await EventItem.distinct('eventId', {
+      assigneeId: req.user._id
+    });
+    filter._id = { $in: assignedEventIds };
+  }
+
+  // Bound the result set: this endpoint is consumed by the Calendar month grid
+  // and the Execution Hub, both of which render every row.
+  const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 500, 1), 1000);
+
+  const events = await Event.find(filter).sort({ startDate: 1 }).limit(limit);
   return res.status(200).json({
     success: true,
     data: events,
@@ -93,9 +113,12 @@ const getEvents = asyncHandler(async (req, res) => {
 
 const createEvent = asyncHandler(async (req, res) => {
   const parsed = scheduleEventSchema.parse(req.body);
-  
-  // SV-M6: compare full timestamps (UTC), documenting policy: start date must be in the future
-  if (new Date(parsed.startDate) < new Date()) {
+
+  // SV-M6: the start date must not be a past CALENDAR DATE. Comparing the full
+  // timestamp instead made same-day scheduling impossible east of Greenwich
+  // (2026-01-15T00:00Z is already < now at 09:00 IST) even though the date
+  // picker explicitly permitted it.
+  if (isBeforeToday(parsed.startDate)) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Start date cannot be in the past');
   }
 
@@ -186,6 +209,14 @@ const deleteEvent = asyncHandler(async (req, res) => {
 });
 
 const getEventProgress = asyncHandler(async (req, res) => {
+  // progressService.recalculate short-circuits on an empty item set, so without
+  // this check an unknown-but-valid ObjectId returned 200 {eventProgress: 0}
+  // instead of 404 — inconsistent with getEventById / updateEvent / deleteEvent.
+  const exists = await Event.exists({ _id: req.params.id });
+  if (!exists) {
+    throw new ApiError(404, 'NOT_FOUND', 'Event not found');
+  }
+
   // BC-5: this is a read — compute and return current progress without
   // triggering a full write of Event + every EventItem on every GET.
   const result = await progressService.recalculate(req.params.id, null, req.user, { persist: false });

@@ -3,6 +3,7 @@ const Event = require('../models/Event');
 const asyncHandler = require('../utils/asyncHandler');
 const scopeItemsForMember = require('../utils/scopeItemsForMember');
 const { getAllowedTransitions } = require('../utils/statusTransitions');
+const { isBeforeToday } = require('../utils/dateOnly');
 
 const getDashboardStats = asyncHandler(async (req, res) => {
   const user = req.user;
@@ -24,14 +25,16 @@ const getDashboardStats = asyncHandler(async (req, res) => {
   const blocked = leaves.filter(i => i.status === 'BLOCKED').length;
   const pending = total - completed;
 
-  const today = new Date();
-  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const overdue = leaves.filter(i => i.dueDate && new Date(i.dueDate) < startOfToday && i.status !== 'COMPLETED').length;
+  // Compare due dates as UTC calendar days, not local-midnight timestamps —
+  // see utils/dateOnly.js. A task due today is never overdue.
+  const isOverdueItem = i =>
+    Boolean(i.dueDate) && isBeforeToday(i.dueDate) && i.status !== 'COMPLETED';
+
+  const overdue = leaves.filter(isOverdueItem).length;
 
   // SV-M10: scope events for MEMBERs — only events where they have assigned work
   let events;
   if (user.role === 'MEMBER') {
-    const assignedItemIds = items.map(i => i.assigneeId);
     const assignedEventIds = new Set(items
       .filter(i => String(i.assigneeId?._id ?? i.assigneeId) === String(user._id))
       .map(i => String(i.eventId)));
@@ -43,28 +46,31 @@ const getDashboardStats = asyncHandler(async (req, res) => {
     ? Math.round(events.reduce((acc, e) => acc + (e.progressPercent || 0), 0) / events.length)
     : 0;
 
-  const upcomingEvents = events.filter(e => e.status !== 'DONE').slice(0, 5);
+  // "Upcoming" means not finished AND not already over — otherwise an event that
+  // started months ago and is still PLANNED shows up as upcoming.
+  const upcomingEvents = events
+    .filter(e => e.status !== 'DONE' && !isBeforeToday(e.endDate || e.startDate))
+    .slice(0, 5);
 
   // My Assigned Work — leaves assigned directly to the caller (any role), with
   // the allowed status transitions for inline editing (T-031 / UI-SPEC §6)
+  const MY_WORK_LIMIT = 20;
   const userStr = String(user._id);
-  const myWork = leaves
-    .filter(i => String(i.assigneeId?._id) === userStr)
-    .slice(0, 20)
-    .map(i => {
-      const ev = events.find(e => String(e._id) === String(i.eventId));
-      return {
-        _id: i._id,
-        title: i.title,
-        status: i.status,
-        priority: i.priority,
-        dueDate: i.dueDate,
-        isOverdue: Boolean(i.dueDate && new Date(i.dueDate) < startOfToday && i.status !== 'COMPLETED'),
-        eventId: i.eventId,
-        eventTitle: ev ? ev.title : '',
-        allowedTransitions: getAllowedTransitions(i.status, user.role)
-      };
-    });
+  const assignedLeaves = leaves.filter(i => String(i.assigneeId?._id) === userStr);
+  const myWork = assignedLeaves.slice(0, MY_WORK_LIMIT).map(i => {
+    const ev = events.find(e => String(e._id) === String(i.eventId));
+    return {
+      _id: i._id,
+      title: i.title,
+      status: i.status,
+      priority: i.priority,
+      dueDate: i.dueDate,
+      isOverdue: isOverdueItem(i),
+      eventId: i.eventId,
+      eventTitle: ev ? ev.title : '',
+      allowedTransitions: getAllowedTransitions(i.status, user.role)
+    };
+  });
 
   return res.status(200).json({
     success: true,
@@ -79,7 +85,11 @@ const getDashboardStats = asyncHandler(async (req, res) => {
         overallProgress
       },
       upcomingEvents,
-      myWork
+      myWork,
+      // Surface the truncation so the UI can say "showing 20 of 27" instead of
+      // silently hiding the remaining tasks with no way to discover them.
+      myWorkTotal: assignedLeaves.length,
+      myWorkTruncated: assignedLeaves.length > MY_WORK_LIMIT
     },
     message: 'Dashboard stats retrieved'
   });

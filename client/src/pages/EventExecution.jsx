@@ -1,7 +1,7 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
-  Folder, FolderOpen, FileText, FolderPlus, MapPin, CheckSquare, Square, Pencil, Trash2
+  Folder, FolderOpen, FolderPlus, MapPin, CheckSquare, Square, Trash2
 } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
@@ -10,7 +10,7 @@ import { useToast } from '../components/common/Toast';
 import TreeView from '../components/common/TreeView';
 import { Modal, ConfirmDialog, Spinner, ErrorState, Chip, STATUS_CHIP, PRIORITY_TEXT } from '../components/common';
 import TaskDetailDrawer from '../components/common/TaskDetailDrawer';
-import { relativeDate } from '../utils/dates';
+import { relativeDate, formatDateUTC, toDateInputValue, isOverdue } from '../utils/dates';
 
 // Mirrors server/src/utils/statusTransitions.js (STATUS_TRANSITIONS) — keep
 // both in sync if the state machine changes. Server is the authoritative
@@ -37,35 +37,52 @@ export default function EventExecution() {
   const [activeDrawerItem, setActiveDrawerItem] = useState(null);
   const [confirmDeleteEvent, setConfirmDeleteEvent] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [pendingItems, setPendingItems] = useState({});
+  const [patched, setPatched] = useState({});
   const [title, setTitle] = useState('');
   const [error, setError] = useState('');
+  const dataRef = useRef(null);
 
   const toast = useToast();
-  const isManager = role === 'MANAGER';
+  // Assignment / priority / due-date controls are Manager-only by design: the role
+// model is "Admin owns structure, not operations" (see T-05 in the server test
+// suite). Do not widen this to ADMIN without changing that test too.
+const isManager = role === 'MANAGER';
   const isAdminOrManager = role === 'ADMIN' || role === 'MANAGER';
-  const eventTitleCtx = useEventTitle();
 
-  const today = new Date();
-  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  // Depend on the stable `setTitle` only. The whole context object is NOT stable
+  // across renders — `getTitle` is rebuilt whenever any title is published — so
+  // including it here would change `load`'s identity after the first fetch,
+  // re-fire the effect below, and request /api/events/:id a second time.
+  const { setTitle: publishEventTitle } = useEventTitle();
 
-  const load = useCallback(() => {
-    setError('');
-    api.get(`/events/${id}`)
+  const load = useCallback((silent = false) => {
+    if (!silent) setError('');
+    return api.get(`/events/${id}`)
       .then(ev => {
+        dataRef.current = ev;
         setData(ev);
         // CL-M4: publish title to context so Layout doesn't duplicate-fetch
-        if (ev.event?.title) eventTitleCtx.setTitle(id, ev.event.title);
+        if (ev.event?.title) publishEventTitle(id, ev.event.title);
       })
-      .catch(err => setError(err.message || 'Failed to load event'));
-  }, [id]);
+      .catch(err => {
+        // A failed background refresh must not tear down an already-rendered
+        // event; only surface the error when there is nothing to show.
+        if (!silent || !dataRef.current) setError(err.message || 'Failed to load event');
+      });
+  }, [id, publishEventTitle]);
 
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
     if (isAdminOrManager) api.get('/users').then(setUsers).catch(err => toast(err.message || 'Failed to load users', 'error'));
-  }, [isAdminOrManager]);
+  }, [isAdminOrManager, toast]);
 
+  // Optimistic overlay for in-flight field edits so controlled selects/inputs do
+  // not visually snap back to the server value during the PUT + refetch.
   const updateItem = async (item, patch) => {
+    setPatched(s => ({ ...s, [item._id]: { ...(s[item._id] || {}), ...patch } }));
     try {
       await api.put(`/events/items/${item._id}`, patch);
       toast('Updated');
@@ -73,34 +90,41 @@ export default function EventExecution() {
       toast(err.message || 'Update failed', 'error');
       throw err;
     } finally {
-      load();
+      // Wait for the refetch to land before dropping the overlay, otherwise the
+      // row briefly renders the stale server value.
+      await load(true);
+      setPatched(s => {
+        if (!s[item._id]) return s;
+        const next = { ...s };
+        delete next[item._id];
+        return next;
+      });
     }
   };
 
   const addChild = async () => {
-    if (!title.trim()) return;
+    if (!title.trim() || adding) return;
+    setAdding(true);
     try {
       await api.post(`/events/${id}/items`, { title: title.trim(), parentId: addModal.parent?._id || null });
       setAddModal(null); setTitle('');
       load();
       toast('Item added');
     } catch (err) { toast(err.message || 'Add failed', 'error'); }
+    finally { setAdding(false); }
   };
-
-  if (error) return <ErrorState message={error} onRetry={load} />;
-  if (!data) return <Spinner label="Loading execution…" className="py-24" />;
-
-  const { event, tree } = data;
-  const prog = Math.round(event.progressPercent || 0);
 
   // CL-M3: compute set of node IDs the current user owns (self or ancestor assigned)
   // so child leaves in an owned branch are editable by MEMBERs.
+  // Must stay ABOVE the early returns below: this is a hook, and render #1 returns
+  // before `data` exists while render #2 (post-fetch) would then add a 14th hook.
+  const tree = data?.tree;
   const ownedNodeIds = useMemo(() => {
     if (role !== 'MEMBER') return null;
     const owned = new Set();
     const walk = (nodes) => {
       nodes.forEach(n => {
-        const isAssigned = String(n.assigneeId?._id ?? n.assigneeId) === String(user._id);
+        const isAssigned = String(n.assigneeId?._id ?? n.assigneeId) === String(user?._id);
         if (isAssigned) {
           const addSubtree = (node) => {
             owned.add(String(node._id));
@@ -111,14 +135,60 @@ export default function EventExecution() {
         walk(n.children || []);
       });
     };
-    walk(tree);
+    walk(tree || []);
     return owned;
-  }, [tree, role, user._id]);
+  }, [tree, role, user?._id]);
 
-  const statusOptionsFor = item =>
-    (TRANSITIONS[item.status] || []).filter(next =>
-      item.status === 'COMPLETED' ? isAdminOrManager : true
-    );
+  if (error) return <ErrorState message={error} onRetry={() => load()} />;
+  if (!data) return <Spinner label="Loading execution…" className="py-24" />;
+
+  const { event } = data;
+  const prog = Math.round(event.progressPercent || 0);
+
+  const statusOptionsFor = item => {
+    // A MEMBER may never reopen a COMPLETED item (enforced server-side in
+    // eventService.updateExecutionItem), so they get no options at all.
+    if (item.status === 'COMPLETED' && !isAdminOrManager) return [];
+    return TRANSITIONS[item.status] || [];
+  };
+
+  // Per-item in-flight guard: without it a double-click fires the whole
+  // NOT_STARTED -> IN_PROGRESS -> COMPLETED chain twice, interleaving statuses
+  // and leaving the final state non-deterministic.
+  const isPending = itemId => !!pendingItems[itemId];
+
+  const runPending = async (itemId, fn) => {
+    setPendingItems(p => ({ ...p, [itemId]: true }));
+    try {
+      await fn();
+    } finally {
+      setPendingItems(p => {
+        if (!p[itemId]) return p;
+        const next = { ...p };
+        delete next[itemId];
+        return next;
+      });
+    }
+  };
+
+  const toggleStatus = node => {
+    const nextStatus = node.status === 'COMPLETED' ? 'IN_PROGRESS' : 'COMPLETED';
+    // updateItem already toasts the failure and rethrows; swallow it here so the
+    // chain never produces an unhandled rejection.
+    runPending(node._id, async () => {
+      if (nextStatus === 'COMPLETED' && (node.status === 'NOT_STARTED' || node.status === 'BLOCKED')) {
+        await updateItem(node, { status: 'IN_PROGRESS' });
+        await updateItem(node, { status: 'COMPLETED' });
+      } else {
+        await updateItem(node, { status: nextStatus });
+      }
+    }).catch(() => {});
+  };
+
+  const changeStatus = (node, status) => {
+    if (!status || status === node.status) return;
+    runPending(node._id, () => updateItem(node, { status })).catch(() => {});
+  };
 
   const handleDeleteEvent = async () => {
     setDeleting(true);
@@ -140,7 +210,7 @@ export default function EventExecution() {
           <div className="min-w-0">
             <h2 className="truncate text-lg font-bold tracking-tight">{event.title}</h2>
             <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-500">
-              <span>{new Date(event.startDate).toLocaleDateString()}{event.endDate ? ` → ${new Date(event.endDate).toLocaleDateString()}` : ''}</span>
+              <span>{formatDateUTC(event.startDate)}{event.endDate ? ` → ${formatDateUTC(event.endDate)}` : ''}</span>
               {event.venue && <span className="flex items-center gap-1"><MapPin className="h-3 w-3" />{event.venue}</span>}
             </p>
           </div>
@@ -203,8 +273,8 @@ export default function EventExecution() {
             renderMain={(node, { hasKids }) => {
               const isCol = !!collapsed[node._id];
               const isCompleted = node.status === 'COMPLETED';
-              const options = statusOptionsFor(node);
-              const canToggleStatus = !hasKids && (
+              const busyRow = isPending(node._id);
+              const canToggleStatus = !hasKids && !busyRow && (
                 role === 'MEMBER'
                   ? (ownedNodeIds ? ownedNodeIds.has(String(node._id)) : false) && node.status !== 'COMPLETED'
                   : true
@@ -220,23 +290,16 @@ export default function EventExecution() {
                     <button
                       type="button"
                       disabled={!canToggleStatus}
-                       onClick={(e) => {
-                         e.stopPropagation();
-                         if (canToggleStatus) {
-                           const nextStatus = isCompleted ? 'IN_PROGRESS' : 'COMPLETED';
-                           // Auto-chain: NOT_STARTED/BLOCKED -> IN_PROGRESS -> COMPLETED
-                           if (nextStatus === 'COMPLETED' && (node.status === 'NOT_STARTED' || node.status === 'BLOCKED')) {
-                             updateItem(node, { status: 'IN_PROGRESS' })
-                               .then(() => updateItem(node, { status: 'COMPLETED' }));
-                           } else {
-                             updateItem(node, { status: nextStatus });
-                           }
-                         }
-                       }}
-                      title={isCompleted ? "Mark in progress" : "Mark completed"}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (canToggleStatus) toggleStatus(node);
+                      }}
+                      title={busyRow ? 'Updating…' : (isCompleted ? 'Mark in progress' : 'Mark completed')}
                       className={`flex h-5 w-5 shrink-0 items-center justify-center rounded transition ${canToggleStatus ? 'cursor-pointer hover:bg-emerald-50' : 'cursor-not-allowed opacity-60'}`}
                     >
-                      {isCompleted ? <CheckSquare className="h-4 w-4 text-emerald-600" /> : <Square className="h-4 w-4 text-slate-300 hover:text-emerald-500" />}
+                      {busyRow
+                        ? <span className="h-3 w-3 animate-spin rounded-full border-2 border-slate-300 border-t-indigo-600" aria-hidden="true" />
+                        : isCompleted ? <CheckSquare className="h-4 w-4 text-emerald-600" /> : <Square className="h-4 w-4 text-slate-300 hover:text-emerald-500" />}
                     </button>
                   )}
 
@@ -256,10 +319,10 @@ export default function EventExecution() {
                   )}
 
                   {node.dueDate && (() => {
-                    const overdue = new Date(node.dueDate) < startOfToday && node.status !== 'COMPLETED';
+                    const overdue = isOverdue(node.dueDate);
                     return (
                       <span className={`flex shrink-0 flex-wrap items-center gap-1 text-[10px] ${overdue ? 'font-semibold text-rose-600' : 'text-slate-500'}`}>
-                        <span className="hidden sm:inline">due {new Date(node.dueDate).toLocaleDateString()}</span>
+                        <span className="hidden sm:inline">due {formatDateUTC(node.dueDate)}</span>
                         <span className="sm:hidden">{relativeDate(node.dueDate)}</span>
                         {overdue && <span className="rounded bg-rose-100 px-1 py-0.5 text-[9px] font-bold text-rose-700">OVERDUE</span>}
                       </span>
@@ -270,10 +333,16 @@ export default function EventExecution() {
             }}
             renderActions={(node, { hasKids }) => {
               const options = statusOptionsFor(node);
+              const busyRow = isPending(node._id);
+              // Merge any in-flight optimistic edit over the server value.
+              const p = patched[node._id] || {};
+              const assigneeId = 'assigneeId' in p ? p.assigneeId : node.assigneeId;
+              const priority = 'priority' in p ? p.priority : node.priority;
+              const dueDate = 'dueDate' in p ? p.dueDate : node.dueDate;
               // CL-M3 parity: same owned-branch check as the row checkbox (canToggleStatus),
               // not just direct assignment — a MEMBER who owns an ancestor folder must get
               // the same status options here as the checkbox already grants them.
-              const canEditStatus = !hasKids && (
+              const canEditStatus = !hasKids && !busyRow && (
                 role === 'MEMBER'
                   ? (ownedNodeIds ? ownedNodeIds.has(String(node._id)) : false) && node.status !== 'COMPLETED'
                   : true
@@ -282,46 +351,49 @@ export default function EventExecution() {
                 <>
                   {isManager && (
                     <select
-                      value={node.assigneeId?._id || ''}
-                      onChange={e => updateItem(node, { assigneeId: e.target.value || null })}
+                      value={assigneeId?._id || assigneeId || ''}
+                      disabled={busyRow}
+                      onChange={e => runPending(node._id, () => updateItem(node, { assigneeId: e.target.value || null })).catch(() => {})}
                       aria-label={`Assignee for ${node.title}`}
-                      className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-[11px] font-semibold text-slate-700"
+                      className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-[11px] font-semibold text-slate-700 disabled:opacity-60"
                     >
                       <option value="">Unassigned</option>
                       {users.map(u => <option key={u._id} value={u._id}>{u.name}</option>)}
                     </select>
                   )}
-                  {!isManager && node.assigneeId && (
+                  {!isManager && assigneeId && (
                     <span className="rounded-md bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600">
-                      {typeof node.assigneeId === 'object' ? node.assigneeId.name : 'Assigned'}
+                      {typeof assigneeId === 'object' ? assigneeId.name : 'Assigned'}
                     </span>
                   )}
 
                   {isManager && (
                     <select
-                      value={node.priority}
-                      onChange={e => updateItem(node, { priority: e.target.value })}
+                      value={priority}
+                      disabled={busyRow}
+                      onChange={e => runPending(node._id, () => updateItem(node, { priority: e.target.value })).catch(() => {})}
                       aria-label={`Priority for ${node.title}`}
-                      className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-[11px] font-semibold text-slate-700"
+                      className="rounded-md border border-slate-300 bg-white px-2 py-1.5 text-[11px] font-semibold text-slate-700 disabled:opacity-60"
                     >
-                      {['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].map(p => <option key={p} value={p}>{p}</option>)}
+                      {['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'].map(p2 => <option key={p2} value={p2}>{p2}</option>)}
                     </select>
                   )}
 
                   {isManager && (
                     <input
                       type="date"
-                      value={node.dueDate ? new Date(node.dueDate).toISOString().slice(0, 10) : ''}
-                      onChange={e => updateItem(node, { dueDate: e.target.value || null })}
+                      value={dueDate ? toDateInputValue(dueDate) : ''}
+                      disabled={busyRow}
+                      onChange={e => runPending(node._id, () => updateItem(node, { dueDate: e.target.value || null })).catch(() => {})}
                       aria-label={`Due date for ${node.title}`}
-                      className="min-h-[32px] rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700"
+                      className="min-h-[32px] rounded-md border border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-700 disabled:opacity-60"
                     />
                   )}
 
                   {canEditStatus && options.length > 0 ? (
                     <select
                       value={node.status}
-                      onChange={e => updateItem(node, { status: e.target.value })}
+                      onChange={e => changeStatus(node, e.target.value)}
                       aria-label={`Status of ${node.title}`}
                       className={`rounded-md border px-2 py-1.5 text-[11px] font-bold uppercase ${STATUS_CHIP[node.status] || STATUS_CHIP.NOT_STARTED}`}
                     >
@@ -367,8 +439,8 @@ export default function EventExecution() {
             className="w-full rounded-lg border border-slate-300 p-2.5 text-xs font-semibold" />
           <div className="mt-4 flex justify-end gap-2">
             <button onClick={() => { setAddModal(null); setTitle(''); }} className="min-h-[36px] px-3 text-xs font-semibold text-slate-600">Cancel</button>
-            <button onClick={addChild} disabled={!title.trim()}
-              className="min-h-[36px] rounded-lg bg-indigo-600 px-3.5 text-xs font-semibold text-white disabled:opacity-50">Add</button>
+            <button onClick={addChild} disabled={!title.trim() || adding}
+              className="min-h-[36px] rounded-lg bg-indigo-600 px-3.5 text-xs font-semibold text-white disabled:opacity-50">{adding ? 'Adding…' : 'Add'}</button>
           </div>
         </Modal>
       )}
@@ -391,12 +463,10 @@ export default function EventExecution() {
         onClose={() => setActiveDrawerItem(null)}
         item={activeDrawerItem}
         onUpdate={async (item, patch) => {
-          try {
-            await updateItem(item, patch);
-            setActiveDrawerItem(prev => prev ? { ...prev, ...patch } : null);
-          } catch (err) {
-            throw err;
-          }
+          // Let the rejection propagate: the drawer renders the error inline
+          // from its own catch, and updateItem has already toasted it.
+          await updateItem(item, patch);
+          setActiveDrawerItem(prev => prev ? { ...prev, ...patch } : null);
         }}
         users={users}
         currentUser={user}
