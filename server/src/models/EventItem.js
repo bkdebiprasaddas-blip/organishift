@@ -55,7 +55,8 @@ const eventItemSchema = new mongoose.Schema(
     attachments: [{
       name: { type: String, required: true },
       url: { type: String, required: true },
-      size: { type: Number, default: 0 },
+      // Unknown for externally linked files; the client used to fabricate 1024.
+      size: { type: Number, default: null },
       uploadedAt: { type: Date, default: Date.now }
     }],
     path: {

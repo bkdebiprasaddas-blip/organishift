@@ -141,7 +141,13 @@ class EventService {
     const { title, nodeType, description, operationalNotes, tags, checklist, comments, attachments, status, assigneeId, priority, dueDate } = updateData;
 
     // Field-Gating Check (§4 Spec)
-    // assigneeId, priority, dueDate -> Manager only
+    // assigneeId, priority, dueDate -> Manager only.
+    //
+    // ADMIN being excluded here is deliberate, not an oversight: the role model
+    // is "Admin owns structure, not operations" (ADMIN builds plans and the
+    // library; MANAGER runs the event). This is asserted by test T-05 in
+    // test/acceptance.test.js — do not widen it to ADMIN without changing that
+    // test and the documented role model first.
     if (assigneeId !== undefined || priority !== undefined || dueDate !== undefined) {
       if (user.role !== 'MANAGER') {
         throw new ApiError(403, 'FORBIDDEN', 'Only Managers can assign items, change priority, or update due dates');
@@ -176,13 +182,35 @@ class EventService {
     if (tags !== undefined) updateFields.tags = tags;
     if (checklist !== undefined) updateFields.checklist = checklist;
     if (comments !== undefined) {
-      // SV-H3: server derives comment author from authenticated user
-      updateFields.comments = comments.map(c => ({
-        text: c.text,
-        user: user._id,
-        userName: user.name,
-        createdAt: c.createdAt || new Date()
-      }));
+      // SV-H3: the server derives comment authorship from the authenticated user
+      // so a client cannot forge an author. The client sends the WHOLE array
+      // (existing comments + the new one), so only entries that arrive WITHOUT
+      // an author are attributed to the caller. Stamping every entry re-attributed
+      // all pre-existing comments to whoever happened to add the latest one,
+      // silently rewriting the audit trail.
+      const existingIds = new Set(
+        (item.comments || []).map(c => String(c._id)).filter(Boolean)
+      );
+      updateFields.comments = comments.map(c => {
+        const isExisting = c._id && existingIds.has(String(c._id));
+        if (isExisting) {
+          // Preserve the original author and timestamp verbatim.
+          const prior = (item.comments || []).find(x => String(x._id) === String(c._id));
+          return {
+            _id: prior._id,
+            text: c.text,
+            user: prior.user,
+            userName: prior.userName,
+            createdAt: prior.createdAt
+          };
+        }
+        return {
+          text: c.text,
+          user: user._id,
+          userName: user.name,
+          createdAt: c.createdAt || new Date()
+        };
+      });
     }
     if (attachments !== undefined) {
       // SV-H3: URL scheme validated by zod + service defense-in-depth
