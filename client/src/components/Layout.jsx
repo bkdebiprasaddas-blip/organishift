@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { Outlet, NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useEventTitle } from '../context/EventTitleContext';
-import api from '../services/api';
 import { LayoutDashboard, FolderTree, ClipboardList, CalendarDays, ListChecks, LogOut, Menu, X } from 'lucide-react';
 
 export default function Layout() {
@@ -37,25 +36,19 @@ export default function Layout() {
   }, [drawerOpen]);
 
   const eventId = location.pathname.match(/^\/events\/([^/]+)/)?.[1];
+
+  // CL-M4: the breadcrumb reads the title from EventTitleContext, which
+  // EventExecution populates from the /api/events/:id response it already
+  // fetches. Layout used to fetch the same endpoint as a "fallback", which meant
+  // every first visit to an event issued two identical requests, and its
+  // `.catch(() => {})` silently stranded the breadcrumb on "Event Execution"
+  // forever if that second request failed. Subscribing only means one request,
+  // and the label resolves as soon as the page's own fetch lands.
+  const sharedEventTitle = eventId ? eventTitleCtx.getTitle(eventId) : '';
+
   useEffect(() => {
-    if (!eventId) {
-      setEventTitle('');
-      return undefined;
-    }
-
-    // CL-M4: try shared title first (set by EventExecution) to avoid duplicate fetch
-    const shared = eventTitleCtx.getTitle(eventId);
-    if (shared) {
-      setEventTitle(shared);
-      return undefined;
-    }
-
-    let alive = true;
-    api.get(`/events/${eventId}`)
-      .then(ev => { if (alive) setEventTitle((ev.event?.title || ev.title) || 'Event Execution'); })
-      .catch(() => {});
-    return () => { alive = false; };
-  }, [eventId]);
+    setEventTitle(sharedEventTitle);
+  }, [sharedEventTitle]);
 
   const getNavLinks = () => {
     const links = [

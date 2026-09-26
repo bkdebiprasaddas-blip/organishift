@@ -31,12 +31,11 @@ export default function TreeView({
 
   return (
     <div className="space-y-1.5">
-      {nodes.map((node, index) => {
+      {nodes.map((node) => {
         const id = keyOf(node);
         const kids = node.children || [];
         const hasKids = kids.length > 0;
         const col = isCollapsed(node);
-        const isLast = index === nodes.length - 1;
 
         return (
           <div key={id} className="relative space-y-1">

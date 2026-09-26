@@ -1,18 +1,35 @@
-import { createContext, useContext, useState } from 'react';
+import { createContext, useCallback, useContext, useMemo, useState } from 'react';
 
 const EventTitleContext = createContext(null);
 
 export const EventTitleProvider = ({ children }) => {
   const [titles, setTitles] = useState({});
 
-  const setTitle = (eventId, title) => {
-    setTitles(prev => ({ ...prev, [eventId]: title }));
-  };
+  // These must be referentially stable: Layout puts the context value in a
+  // useEffect dependency list, and a new object every render would re-trigger
+  // the effect (and its /api/events fetch) on every single render.
+  const setTitle = useCallback((eventId, title) => {
+    setTitles(prev => (prev[eventId] === title ? prev : { ...prev, [eventId]: title }));
+  }, []);
 
-  const getTitle = (eventId) => titles[eventId] || '';
+  const clearTitle = useCallback((eventId) => {
+    setTitles(prev => {
+      if (!(eventId in prev)) return prev;
+      const next = { ...prev };
+      delete next[eventId];
+      return next;
+    });
+  }, []);
+
+  const getTitle = useCallback((eventId) => titles[eventId] || '', [titles]);
+
+  const value = useMemo(
+    () => ({ getTitle, setTitle, clearTitle }),
+    [getTitle, setTitle, clearTitle]
+  );
 
   return (
-    <EventTitleContext.Provider value={{ getTitle, setTitle }}>
+    <EventTitleContext.Provider value={value}>
       {children}
     </EventTitleContext.Provider>
   );

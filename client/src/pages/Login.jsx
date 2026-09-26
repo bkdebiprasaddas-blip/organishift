@@ -10,7 +10,11 @@ export default function Login() {
   const { login, user, loading } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const from = location.state?.from || '/dashboard';
+  // Only follow same-origin in-app paths. A crafted `state.from` such as
+  // "//evil.example" or "https://evil.example" must never become a redirect
+  // target, so anything that is not a single-slash path is discarded.
+  const rawFrom = location.state?.from;
+  const from = typeof rawFrom === 'string' && /^\/(?!\/)/.test(rawFrom) ? rawFrom : '/dashboard';
 
   if (loading) {
     return (
@@ -23,8 +27,13 @@ export default function Login() {
     );
   }
 
+  // Redirect to the page the user was originally bounced from. This used to be
+  // hardcoded to /dashboard, which made App.jsx's `state: { from }` dead code:
+  // an ADMIN whose token expired on /event-plans?plan=65f… always landed on the
+  // dashboard and had to re-navigate. The guard below is only for a user who
+  // navigates to /login while ALREADY authenticated.
   if (user) {
-    return <Navigate to="/dashboard" replace />;
+    return <Navigate to={from} replace />;
   }
 
   const handleSubmit = async (e) => {

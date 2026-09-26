@@ -1,15 +1,14 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
-  Folder, FolderOpen, FileText, FolderPlus,
+  Folder, FolderOpen, FolderPlus,
   Pencil, FolderSymlink, Trash2, Plus, Search,
   Boxes, Layers, ListTree, Sparkles, Download, Copy, Check,
-  StickyNote, CornerDownRight, FileQuestion, CheckSquare, Square
+  StickyNote, CornerDownRight, CheckSquare, Square
 } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/common/Toast';
 import TreeView from '../components/common/TreeView';
-import DropdownMenu from '../components/common/DropdownMenu';
 import { Modal, ConfirmDialog, EmptyState, ErrorState, SkeletonCard } from '../components/common';
 
 export default function PlanningLibrary() {
@@ -43,8 +42,13 @@ export default function PlanningLibrary() {
 
   const toast = useToast();
 
+  // `silent` is only ever meant to be set programmatically. Guard against it
+  // being handed a click event: `onRetry={load}` would call load(MouseEvent),
+  // and since a MouseEvent is truthy the loading state was skipped, so the error
+  // banner cleared and an empty library flashed before the data arrived.
   const load = (silent = false) => {
-    if (!silent) setLoading(true);
+    const isSilent = silent === true;
+    if (!isSilent) setLoading(true);
     setError('');
     api.get('/planning-items', { params: { scope: 'LIBRARY' } })
       .then(data => { setTree(data); })
@@ -197,6 +201,16 @@ export default function PlanningLibrary() {
     return filterNodes(tree);
   }, [tree, searchQuery]);
 
+  // filteredTree holds the matched ROOT nodes, not the matched items, so
+  // filteredTree.length reported "2" while the tree visibly expanded 11 rows.
+  // Count every node actually present in the filtered result instead.
+  const matchedItemCount = useMemo(() => {
+    let n = 0;
+    const walk = nodes => nodes.forEach(node => { n += 1; walk(node.children || []); });
+    walk(filteredTree);
+    return n;
+  }, [filteredTree]);
+
   // Export JSON functionality
   const exportJSON = () => {
     const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(tree, null, 2));
@@ -238,7 +252,7 @@ export default function PlanningLibrary() {
   }
 
   if (error && tree.length === 0) {
-    return <ErrorState message={error} onRetry={load} />;
+    return <ErrorState message={error} onRetry={() => load()} />;
   }
 
   return (
@@ -325,7 +339,7 @@ export default function PlanningLibrary() {
         </div>
         {searchQuery && (
           <span className="text-xs font-semibold text-indigo-600">
-            Showing matching items ({filteredTree.length})
+            Showing matching items ({matchedItemCount})
           </span>
         )}
       </div>
@@ -539,16 +553,22 @@ export default function PlanningLibrary() {
           </div>
 
           <div className="space-y-4">
+            {!isAdmin && (
+              <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-[11px] font-semibold text-amber-800">
+                Read-only view — an Admin must make changes to library items.
+              </p>
+            )}
             <div>
               <label className="mb-1 block text-xs font-semibold text-slate-700">
                 Title <span className="text-rose-500">*</span>
               </label>
               <input
                 autoFocus
+                readOnly={!isAdmin}
                 value={modal.title}
                 onChange={e => setModal(m => ({ ...m, title: e.target.value }))}
                 placeholder="e.g. Stage Setup, Sound Systems..."
-                className={`w-full rounded-lg border p-2.5 text-xs font-semibold ${modal.title?.trim() ? 'border-slate-300' : 'border-rose-300'}`}
+                className={`w-full rounded-lg border p-2.5 text-xs font-semibold ${modal.title?.trim() ? 'border-slate-300' : 'border-rose-300'} ${!isAdmin ? 'bg-slate-50 text-slate-600' : ''}`}
               />
             </div>
 
@@ -559,15 +579,22 @@ export default function PlanningLibrary() {
               </label>
               <textarea
                 rows={3}
+                readOnly={!isAdmin}
+                maxLength={1000}
                 value={modal.description}
                 onChange={e => setModal(m => ({ ...m, description: e.target.value }))}
                 placeholder="Add operational guidelines, setup notes, or vendor requirements..."
-                className="w-full rounded-lg border border-slate-300 p-2.5 text-xs font-medium text-slate-800 placeholder-slate-400 focus:border-indigo-500 focus:outline-none"
+                className={`w-full rounded-lg border border-slate-300 p-2.5 text-xs font-medium text-slate-800 placeholder-slate-400 focus:border-indigo-500 focus:outline-none ${!isAdmin ? 'bg-slate-50 text-slate-600' : ''}`}
               />
+              {isAdmin && (
+                <p className="mt-1 text-right text-[10px] text-slate-400">
+                  {(modal.description || '').length}/1000
+                </p>
+              )}
             </div>
 
             {/* Productive Tools Section inside Popup */}
-            {modal.node && (
+            {modal.node && isAdmin && (
               <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3.5 space-y-3">
                 <p className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
                   <Sparkles className="h-3.5 w-3.5 text-indigo-600" /> Item Tools & Quick Actions
@@ -609,14 +636,21 @@ export default function PlanningLibrary() {
           </div>
 
           <div className="mt-5 flex justify-end gap-2 border-t border-slate-100 pt-3">
-            <button onClick={() => setModal(null)} className="min-h-[36px] px-3.5 py-1.5 text-xs font-semibold text-slate-600">Cancel</button>
-            <button
-              onClick={saveItem}
-              disabled={busy || !modal.title?.trim()}
-              className="min-h-[36px] rounded-lg bg-indigo-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm disabled:opacity-50"
-            >
-              {busy ? 'Saving…' : 'Save Changes'}
+            <button onClick={() => setModal(null)} className="min-h-[36px] px-3.5 py-1.5 text-xs font-semibold text-slate-600">
+              {isAdmin ? 'Cancel' : 'Close'}
             </button>
+            {/* Only Admins can mutate the library (planningRoutes.js gates every
+                write behind requireRole('ADMIN')), so a Manager must not be
+                offered a Save button that can only ever return 403. */}
+            {isAdmin && (
+              <button
+                onClick={saveItem}
+                disabled={busy || !modal.title?.trim()}
+                className="min-h-[36px] rounded-lg bg-indigo-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm disabled:opacity-50"
+              >
+                {busy ? 'Saving…' : 'Save Changes'}
+              </button>
+            )}
           </div>
         </Modal>
       )}
@@ -624,7 +658,7 @@ export default function PlanningLibrary() {
       {/* Move Modal */}
       {modal?.type === 'move' && (
         <Modal onClose={() => setModal(null)} labelledBy="lib-move-title">
-          <h3 id="lib-move-title" className="mb-3 text-base font-bold text-slate-900">Move "{modal.node.title}"</h3>
+          <h3 id="lib-move-title" className="mb-3 text-base font-bold text-slate-900">Move &ldquo;{modal.node.title}&rdquo;</h3>
           <label htmlFor="lib-move-parent" className="mb-1 block text-xs font-semibold text-slate-700">New parent</label>
           <select
             id="lib-move-parent"

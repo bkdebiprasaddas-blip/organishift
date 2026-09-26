@@ -27,7 +27,10 @@ const ProtectedRoute = ({ children, allowedRoles }) => {
   }
 
   if (!user) {
-    return <Navigate to="/login" state={{ from: location.pathname }} replace />;
+    // Preserve the query string too — EventPlans keeps the selected plan in
+    // ?plan=<id>, so capturing only pathname dropped the admin back onto the
+    // plan grid with nothing selected.
+    return <Navigate to="/login" state={{ from: `${location.pathname}${location.search}` }} replace />;
   }
 
   if (allowedRoles && !allowedRoles.includes(user.role)) {

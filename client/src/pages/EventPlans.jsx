@@ -1,14 +1,13 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
-  ClipboardList, ArrowLeft, ChevronRight, Folder, FolderOpen,
-  FileText, FolderPlus, Trash2, Plus, DownloadCloud
+  ClipboardList, ArrowLeft, Folder, FolderOpen,
+  FileText, FolderPlus, Trash2
 } from 'lucide-react';
 import api from '../services/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../components/common/Toast';
 import TreeView from '../components/common/TreeView';
-import DropdownMenu from '../components/common/DropdownMenu';
 import { Modal, ConfirmDialog, Spinner, EmptyState, ErrorState, SkeletonCard } from '../components/common';
 
 export default function EventPlans() {
@@ -44,19 +43,25 @@ export default function EventPlans() {
       .finally(() => setLoading(false));
   };
 
+  // CL-M8 + stale-response guard: without an `alive` check, clicking plan A then
+  // plan B could let A's slower response land last and overwrite B's tree,
+  // leaving the header showing plan B's title above plan A's modules.
+  const planItemsRequestId = useRef(0);
   const loadPlanItems = useCallback(id => {
+    const requestId = ++planItemsRequestId.current;
     if (!id) {
       setPlanTree([]);
       setItemsError('');
+      setItemsLoading(false);
       return;
     }
     setItemsError('');
     setItemsLoading(true);
     setPlanTree([]); // CL-M8: clear tree to avoid flash of stale plan data
     api.get('/planning-items', { params: { scope: 'PLAN', planId: id } })
-      .then(setPlanTree)
-      .catch(err => setItemsError(err.message || 'Failed to load plan modules'))
-      .finally(() => setItemsLoading(false));
+      .then(data => { if (requestId === planItemsRequestId.current) setPlanTree(data); })
+      .catch(err => { if (requestId === planItemsRequestId.current) setItemsError(err.message || 'Failed to load plan modules'); })
+      .finally(() => { if (requestId === planItemsRequestId.current) setItemsLoading(false); });
   }, []);
 
   useEffect(() => { loadPlans(); }, []);
@@ -92,9 +97,11 @@ export default function EventPlans() {
         category: modal.category.trim() || 'General',
         description: modal.description.trim()
       });
-      await new Promise(resolve => {
-        api.get('/event-plans').then(data => { setPlans(data); resolve(); }).catch(resolve);
-      });
+      // Insert the created plan into local state instead of relying on a refetch.
+      // The old refetch swallowed its own error, so when it failed `selectPlan`
+      // ran against a list that did not contain the new plan and the admin was
+      // dropped back to a grid where the plan they just made had vanished.
+      setPlans(prev => [created, ...prev]);
       setModal(null);
       selectPlan(created._id);
       toast(`Created "${created.title}"`);
@@ -291,6 +298,7 @@ export default function EventPlans() {
             title={`Delete "${confirm.item.title}"?`}
             message={<>This removes <b>{confirm.total} item{confirm.total === 1 ? '' : 's'}</b> from the blueprint.</>}
             confirmLabel={`Delete ${confirm.total} item${confirm.total === 1 ? '' : 's'}`}
+            busy={busy}
             onConfirm={deleteItem}
             onCancel={() => setConfirm(null)}
           />
@@ -301,6 +309,7 @@ export default function EventPlans() {
             title="Delete this plan?"
             message={<>Blueprint <b>{confirm.plan.title}</b> will be permanently removed. This does not affect the Library or scheduled events.</>}
             confirmLabel="Delete Plan"
+            busy={busy}
             onConfirm={deletePlan}
             onCancel={() => setConfirm(null)}
           />

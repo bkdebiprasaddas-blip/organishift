@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
 import {
-  X, CheckSquare, Square, StickyNote, Tag, MessageSquare, Paperclip,
-  Calendar, User, AlertCircle, Plus, Trash2, Send, Clock, Layers, ShieldCheck
+  X, CheckSquare, Square, StickyNote, Tag, Paperclip,
+  Calendar, Trash2, Send
 } from 'lucide-react';
-import { Chip, STATUS_CHIP, PRIORITY_TEXT } from './chips';
+import { Chip, PRIORITY_TEXT } from './chips';
 import { useToast } from './Toast';
 
 const VALID_URL_SCHEME = /^https?:\/\//i;
@@ -15,7 +15,7 @@ export default function TaskDetailDrawer({
   onUpdate,
   users = [],
   currentUser,
-  isManager
+  isManager = false
 }) {
   const [activeTab, setActiveTab] = useState('details'); // details | checklist | notes | comments | attachments
   const [title, setTitle] = useState('');
@@ -37,6 +37,13 @@ const [saveError, setSaveError] = useState('');
   const toast = useToast();
   const panelRef = useRef(null);
   const onCloseRef = useRef(onClose);
+  const saveDepth = useRef(0);
+
+  // Stable identity for "which task is open". `item` itself must never be a hook
+  // dependency here: the parent replaces that object on every successful autosave.
+  const itemId = item?._id ?? null;
+  const itemRef = useRef(item);
+  itemRef.current = item;
   onCloseRef.current = onClose;
 
   // CL-M5 / BC-1: Escape close + focus trap + scroll lock + dialog semantics.
@@ -47,7 +54,11 @@ const [saveError, setSaveError] = useState('');
   // while the drawer stays open (item is replaced on each field save), yanking
   // focus back to the first field — the same bug this effect exists to avoid.
   useEffect(() => {
-    if (!isOpen || !item) return undefined;
+    // `itemId` is used rather than `item` purely as an existence check: the
+    // component already returns null unless both are set, and `item` gets a new
+    // identity on every autosave, which would re-run this trap and yank focus
+    // back to the first field mid-edit.
+    if (!isOpen || !itemId) return undefined;
 
     const panel = panelRef.current;
     if (!panel) return undefined;
@@ -89,33 +100,50 @@ const [saveError, setSaveError] = useState('');
         previouslyFocused.focus();
       }
     };
-  }, [isOpen]);
+  }, [isOpen, itemId]);
 
+  // Seed the local editor fields ONLY when a different task is opened.
+  //
+  // This used to depend on `item`, but the parent replaces that object on every
+  // successful autosave (`setActiveDrawerItem(prev => ({ ...prev, ...patch }))`).
+  // So saving one field re-ran this effect and reset ALL the others to their
+  // last-fetched server values — typing in Description and then adding a tag
+  // silently discarded the unsaved description. Keying on the task id means the
+  // fields are reset when the drawer switches tasks, not when data refreshes.
+  //
+  // The latest `item` is read through a ref so it isn't a dependency at all.
   useEffect(() => {
-    if (item) {
-      setTitle(item.title || '');
-      setDescription(item.description || '');
-      setOperationalNotes(item.operationalNotes || '');
-      setNodeType(item.nodeType || 'TASK');
-      setTags(item.tags || []);
-      setChecklist(item.checklist || []);
-      setComments(item.comments || []);
-      setAttachments(item.attachments || []);
+    const current = itemRef.current;
+    if (current) {
+      setTitle(current.title || '');
+      setDescription(current.description || '');
+      setOperationalNotes(current.operationalNotes || '');
+      setNodeType(current.nodeType || 'TASK');
+      setTags(current.tags || []);
+      setChecklist(current.checklist || []);
+      setComments(current.comments || []);
+      setAttachments(current.attachments || []);
     }
-  }, [item]);
+  }, [itemId]);
 
   if (!isOpen || !item) return null;
 
+  // Autosaves can overlap (blur one field while another is still in flight). A
+  // plain boolean `saving` flag is cleared by whichever request finishes first,
+  // so track the depth instead and only report an error if nothing succeeded.
   const handleSaveField = async (patch) => {
     if (!onUpdate) return;
+    saveDepth.current += 1;
     setSaving(true);
     setSaveError('');
     try {
       await onUpdate(item, patch);
+      setSaveError('');
     } catch (err) {
       setSaveError(err.message || 'Save failed');
     } finally {
-      setSaving(false);
+      saveDepth.current = Math.max(0, saveDepth.current - 1);
+      if (saveDepth.current === 0) setSaving(false);
     }
   };
 
@@ -182,7 +210,10 @@ const [saveError, setSaveError] = useState('');
     }
     const updated = [
       ...attachments,
-      { name, url, size: 1024, uploadedAt: new Date().toISOString() }
+      // These are external links, not uploads, so the byte size is unknown.
+      // The previous hardcoded `size: 1024` was a fabricated value stored in the
+      // DB for every attachment. `null` is honest; the schema allows it.
+      { name, url, size: null, uploadedAt: new Date().toISOString() }
     ];
     setAttachments(updated);
     setNewAttachmentName('');
@@ -384,7 +415,10 @@ const [saveError, setSaveError] = useState('');
 
                 <div className="space-y-2">
                   {checklist.map((row, idx) => (
-                    <div key={idx} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 p-2.5 hover:bg-slate-50">
+                    // Checklists can be reordered/removed, so an index key makes
+                    // React reuse the wrong DOM node (and focus) after a removal.
+                    // Fall back to the index only for rows with no server id yet.
+                    <div key={row._id || `new-${idx}`} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 p-2.5 hover:bg-slate-50">
                       <button
                         type="button"
                         onClick={() => toggleChecklistRow(idx)}
@@ -442,7 +476,7 @@ const [saveError, setSaveError] = useState('');
               <div className="space-y-4">
                 <div className="space-y-3">
                   {comments.map((c, idx) => (
-                    <div key={idx} className="rounded-xl border border-slate-200 bg-slate-50/60 p-3 space-y-1">
+                    <div key={c._id || `new-${idx}`} className="rounded-xl border border-slate-200 bg-slate-50/60 p-3 space-y-1">
                       <div className="flex items-center justify-between text-[11px]">
                         <span className="font-bold text-slate-900">{c.userName || 'Team Member'}</span>
                         <span className="text-slate-400">{new Date(c.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
@@ -502,7 +536,7 @@ const [saveError, setSaveError] = useState('');
 
                 <div className="space-y-2">
                   {attachments.map((att, idx) => (
-                    <div key={idx} className="flex items-center justify-between rounded-lg border border-slate-200 p-2.5">
+                    <div key={att._id || `${att.url}-${idx}`} className="flex items-center justify-between rounded-lg border border-slate-200 p-2.5">
                       <div className="flex items-center gap-2 min-w-0">
                         <Paperclip className="h-4 w-4 text-indigo-600 shrink-0" />
                         {VALID_URL_SCHEME.test(att.url) ? (

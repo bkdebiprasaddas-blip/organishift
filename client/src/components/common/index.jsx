@@ -6,6 +6,12 @@ import { useEffect, useRef } from 'react';
  */
 export function Modal({ onClose, children, labelledBy, wide = false }) {
   const panelRef = useRef(null);
+  // Callers pass an inline arrow (`onClose={() => setModal(null)}`), so `onClose`
+  // is a new function on every render. Putting it in the effect's dependency
+  // array would tear down and re-run the focus trap / key listener on every
+  // parent render. Read it through a ref instead.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     const previouslyFocused = document.activeElement;
@@ -23,7 +29,7 @@ export function Modal({ onClose, children, labelledBy, wide = false }) {
     const onKeyDown = e => {
       if (e.key === 'Escape') {
         e.stopPropagation();
-        onClose?.();
+        onCloseRef.current?.();
         return;
       }
       if (e.key !== 'Tab' || !panel) return;
@@ -55,7 +61,7 @@ export function Modal({ onClose, children, labelledBy, wide = false }) {
   }, []);
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onMouseDown={onClose}>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" onMouseDown={() => onCloseRef.current?.()}>
       <div
         ref={panelRef}
         role="dialog"
@@ -84,7 +90,7 @@ export function ConfirmDialog({ title, message, confirmLabel = 'Delete', onConfi
       </div>
       <div className="mt-5 flex justify-end gap-2">
         <button onClick={onCancel} disabled={busy} className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Cancel</button>
-        <button onClick={onConfirm} disabled={busy} className="rounded-lg bg-rose-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-rose-500 disabled:opacity-50">{busy ? 'Deleting...' : confirmLabel}</button>
+        <button onClick={onConfirm} disabled={busy} className="rounded-lg bg-rose-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-rose-500 disabled:opacity-50">{busy ? `${confirmLabel}…` : confirmLabel}</button>
       </div>
     </Modal>
   );
