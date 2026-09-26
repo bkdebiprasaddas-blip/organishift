@@ -42,16 +42,20 @@ class EventPlanService {
 
       const idMap = new Map();
       const createdPlanItems = [];
+      // Path/level of each item as it is created. The old code re-queried the
+      // parent with PlanningItem.findById on every iteration (one extra round
+      // trip per node); the value was always a document we had just written.
+      const metaByLibId = new Map();
 
-       for (const libItem of libBranch) {
+      for (const libItem of libBranch) {
         const parentPlanId = libItem.parentId ? idMap.get(String(libItem.parentId)) : null;
 
         let parentPath = ',';
         let computedLevel = 0;
         if (parentPlanId) {
-          const parentDoc = await PlanningItem.findById(parentPlanId, null, sopt);
-          parentPath = parentDoc.path;
-          computedLevel = parentDoc.level + 1;
+          const parentMeta = metaByLibId.get(String(libItem.parentId));
+          parentPath = parentMeta.path;
+          computedLevel = parentMeta.level + 1;
         }
 
         const pItem = new PlanningItem({
@@ -75,6 +79,7 @@ class EventPlanService {
         await pItem.save(sopt);
 
         idMap.set(String(libItem._id), pItem._id);
+        metaByLibId.set(String(libItem._id), { path: pItem.path, level: pItem.level });
         createdPlanItems.push(pItem);
       }
 

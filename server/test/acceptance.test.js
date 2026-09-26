@@ -368,6 +368,145 @@ test('T-18: member sees owned branch (assigned node + descendants) + ancestors, 
   assert.ok(!ids.includes(String(other._id)));
 });
 
+test('T-18b: member assigned mid-tree sees descendants AND ancestor context rows', async () => {
+  const { event, mk } = await makeEventWithTree();
+  const scopeItemsForMember = require('../src/utils/scopeItemsForMember');
+  // root -> mid(assigned to member) -> child -> grandchild, plus a sibling root.
+  const root = await mk('Root', null, ',', 0, 0);
+  const mid = await mk('Mid', root._id, root.path, 1, 0, { assigneeId: memberUser._id });
+  const child = await mk('Child', mid._id, mid.path, 2, 0);
+  const grandchild = await mk('GrandChild', child._id, child.path, 3, 0);
+  const sibling = await mk('SiblingRoot', null, ',', 0, 1);
+  const siblingChild = await mk('SiblingChild', sibling._id, sibling.path, 1, 0);
+
+  const items = await EventItem.find({ eventId: event._id });
+  const visible = new Set(scopeItemsForMember(items, memberUser._id).map(i => String(i._id)));
+
+  // Assigned node, its descendants, and the ancestors above it.
+  for (const n of [root, mid, child, grandchild]) {
+    assert.ok(visible.has(String(n._id)), `${n.title} should be visible`);
+  }
+  // Everything on an unowned branch stays hidden.
+  for (const n of [sibling, siblingChild]) {
+    assert.ok(!visible.has(String(n._id)), `${n.title} should NOT be visible`);
+  }
+});
+
+test('T-18c: scoping rewrite is behaviourally identical to the previous algorithm', () => {
+  const scopeItemsForMember = require('../src/utils/scopeItemsForMember');
+
+  // The original implementation, kept verbatim as a differential oracle.
+  const legacy = (items, userId) => {
+    const ownedIds = new Set();
+    const userStr = String(userId);
+    const assigned = items.filter(
+      i => String(i.assigneeId?._id ?? i.assigneeId) === userStr
+    );
+    assigned.forEach(i => {
+      i.path.split(',').filter(Boolean).forEach(id => ownedIds.add(id));
+      items.forEach(o => {
+        if (o.path.startsWith(i.path)) ownedIds.add(String(o._id));
+      });
+    });
+    return items.filter(item => ownedIds.has(String(item._id)));
+  };
+
+  // Deterministic PRNG so a failure is reproducible.
+  let seed = 987654321;
+  const rnd = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x7fffffff;
+  };
+
+  for (let trial = 0; trial < 300; trial++) {
+    const users = ['u1', 'u2', 'u3'];
+    const nodes = [];
+    const count = 1 + Math.floor(rnd() * 25);
+    for (let i = 0; i < count; i++) {
+      // Attach to any earlier node (guarantees a valid, acyclic tree).
+      const parentIdx = i === 0 ? -1 : Math.floor(rnd() * i);
+      const parent = parentIdx >= 0 ? nodes[parentIdx] : null;
+      const self = `n${i}`;
+      nodes.push({
+        _id: self,
+        parentId: parent ? parent._id : null,
+        path: parent ? `${parent.path}${self},` : `,${self},`,
+        assigneeId: rnd() < 0.25 ? users[Math.floor(rnd() * users.length)] : null
+      });
+    }
+
+    for (const u of users) {
+      const a = legacy(nodes, u).map(n => n._id).sort();
+      const b = scopeItemsForMember(nodes, u).map(n => n._id).sort();
+      assert.deepStrictEqual(b, a, `mismatch on trial ${trial} for user ${u}`);
+    }
+  }
+});
+
+test('T-18d: scoping handles an unassigned member and an empty item list', () => {
+  const scopeItemsForMember = require('../src/utils/scopeItemsForMember');
+  assert.deepStrictEqual(scopeItemsForMember([], 'u1'), []);
+
+  const nodes = [
+    { _id: 'a', parentId: null, path: ',a,', assigneeId: 'u1' },
+    { _id: 'b', parentId: 'a', path: ',a,b,', assigneeId: null }
+  ];
+  assert.deepStrictEqual(scopeItemsForMember(nodes, 'nobody').map(n => n._id), []);
+  // A missing `path` must not throw (the old version called .split on it).
+  const noPath = [{ _id: 'c', parentId: null, assigneeId: 'u1' }];
+  assert.deepStrictEqual(scopeItemsForMember(noPath, 'u1').map(n => n._id), ['c']);
+});
+
+test('PERF-1: progress recalc persists values but does not disturb __v', async () => {
+  const progressService = require('../src/services/progressService');
+  const { event, mk } = await makeEventWithTree();
+  const branch = await mk('Branch', null, ',', 0, 0);
+  const leafA = await mk('LeafA', branch._id, branch.path, 1, 0);
+  const leafB = await mk('LeafB', branch._id, branch.path, 1, 1);
+
+  // Baseline: nothing complete yet.
+  let out = await progressService.recalculate(event._id);
+  assert.strictEqual(out.eventProgress, 0);
+
+  // Complete one of two leaves -> branch 50%, event 50%.
+  await EventItem.updateOne({ _id: leafA._id }, { status: 'COMPLETED' });
+  out = await progressService.recalculate(event._id);
+  assert.strictEqual(out.eventProgress, 50);
+
+  const persisted = await EventItem.find({ eventId: event._id });
+  const byTitle = t => persisted.find(i => i.title === t);
+  assert.strictEqual(byTitle('LeafA').progressPercent, 100);
+  assert.strictEqual(byTitle('LeafB').progressPercent, 0);
+  assert.strictEqual(byTitle('Branch').progressPercent, 50);
+  assert.strictEqual((await Event.findById(event._id)).progressPercent, 50);
+
+  // progressPercent is derived data, so persisting it must not bump __v.
+  // Otherwise it invalidates the optimistic-concurrency token that
+  // updateExecutionItem filters on, and concurrent editors of unrelated
+  // branches collide with a spurious 409.
+  await EventItem.updateMany({ eventId: event._id }, { $set: { __v: 0 } });
+  await progressService.recalculate(event._id);
+  const afterRecalc = await EventItem.find({ eventId: event._id });
+  afterRecalc.forEach(i => {
+    assert.strictEqual(i.__v, 0, `${i.title}.__v was bumped by a progress write`);
+  });
+
+  // An unchanged recalc must not write at all (idempotent no-op).
+  const before = await EventItem.find({ eventId: event._id }).lean();
+  await progressService.recalculate(event._id);
+  const after = await EventItem.find({ eventId: event._id }).lean();
+  assert.deepStrictEqual(
+    after.map(i => [String(i._id), i.progressPercent, i.updatedAt]),
+    before.map(i => [String(i._id), i.progressPercent, i.updatedAt]),
+    'a no-op recalc should not touch updatedAt'
+  );
+
+  // Finish the job: both leaves complete -> 100%.
+  await EventItem.updateOne({ _id: leafB._id }, { status: 'COMPLETED' });
+  out = await progressService.recalculate(event._id);
+  assert.strictEqual(out.eventProgress, 100);
+});
+
 // ---------- SV-H2: IDOR — MEMBER cannot edit content fields of foreign items ----------
 test('SV-H2: member editing foreign item title -> 403; editing own-branch item -> 200', async () => {
   const { event, mk } = await makeEventWithTree();

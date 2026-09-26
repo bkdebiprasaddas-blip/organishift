@@ -88,9 +88,32 @@ class ProgressService {
     if (persist) {
       // BC-5: only write to MongoDB when the caller is a mutating operation
       // (schedule / add / update / delete item) — not a plain progress read.
+      //
+      // Two changes from the original `for (...) await item.save()` loop:
+      //
+      // 1. Only genuinely changed nodes are written, and they go out in a single
+      //    bulkWrite. Toggling one checkbox used to issue one UPDATE per item in
+      //    the event (15+ round trips for an 11-item plan).
+      //
+      // 2. The writes no longer bump `__v`. progressPercent is derived data, so
+      //    persisting it must not invalidate a concurrent editor's optimistic
+      //    concurrency token in eventService.updateExecutionItem — otherwise two
+      //    people editing two different branches of the same event could collide
+      //    with a spurious 409 CONFLICT. Deliberately filtering on `_id` only
+      //    (never `__v`) keeps that token owned by real content edits.
+      const ops = [];
       for (const item of items) {
-        item.progressPercent = progressById.get(String(item._id));
-        await item.save(sopt);
+        const next = progressById.get(String(item._id));
+        if (next === undefined || item.progressPercent === next) continue;
+        ops.push({
+          updateOne: {
+            filter: { _id: item._id },
+            update: { $set: { progressPercent: next } }
+          }
+        });
+      }
+      if (ops.length > 0) {
+        await EventItem.bulkWrite(ops, sopt);
       }
       await Event.findByIdAndUpdate(eventId, { progressPercent: eventProgress }, sopt);
     }

@@ -49,5 +49,8 @@ module.exports = {
   JWT_EXPIRES_IN: process.env.JWT_EXPIRES_IN || '24h',
   CLIENT_ORIGIN: process.env.CLIENT_ORIGIN || 'http://localhost:5173',
   NODE_ENV,
-  IS_TEST
+  IS_TEST,
+  // Number of trusted reverse proxies in front of the app (usually 1). Left
+  // unset by default so local development is unaffected. See server.js.
+  TRUST_PROXY: process.env.TRUST_PROXY || ''
 };

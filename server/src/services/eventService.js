@@ -38,6 +38,11 @@ class EventService {
       const planItems = await PlanningItem.find({ planId, scope: 'PLAN' }).sort({ level: 1, order: 1 });
       const idMap = new Map();
       const createdItems = [];
+      // Path of each EventItem as it is created. The old code re-queried the
+      // parent with EventItem.findById on every iteration (an extra round trip
+      // per node, and it went through .session(session) with a possibly-null
+      // session); the value was always a document we had just written.
+      const pathByPlanItemId = new Map();
 
       for (const pItem of planItems) {
         const parentEventItemId = pItem.parentId ? idMap.get(String(pItem.parentId)) : null;
@@ -62,15 +67,14 @@ class EventService {
           sourcePlanningItemId: pItem._id
         });
 
-        if (parentEventItemId) {
-          const parentDoc = await EventItem.findById(parentEventItemId).session(session);
-          eItem.path = `${parentDoc.path}${eItem._id},`;
-        } else {
-          eItem.path = `,${eItem._id},`;
-        }
+        const parentPath = parentEventItemId
+          ? pathByPlanItemId.get(String(pItem.parentId))
+          : ',';
+        eItem.path = `${parentPath}${eItem._id},`;
         await eItem.save(sopt);
 
         idMap.set(String(pItem._id), eItem._id);
+        pathByPlanItemId.set(String(pItem._id), eItem.path);
         createdItems.push(eItem);
       }
 
